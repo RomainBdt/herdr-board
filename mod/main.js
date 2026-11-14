@@ -27,6 +27,17 @@ const DEFAULTS = {
   notifyDone: false,                 // Herdr already says when an agent finishes
   machine: "server", script: "C:/fake-server/herdr-board/herdr-board.mjs", board: "C:/fake-server/board",
 };
+// One short line for the header, from whatever the CLI or node printed.
+function explain(err) {
+  const s = cfg();
+  if (!s.script || !s.board) return "Not set up yet: set the machine and the paths in ⚙ → Connection.";
+  if (/Cannot find module/.test(err)) return `No board CLI at ${s.script}. Check ⚙ → Connection.`;
+  if (/no board\.json/.test(err)) return `No board.json in ${s.board}. Check ⚙ → Connection.`;
+  if (/not recognized|ENOENT|command not found/.test(err)) return "Node isn't installed (or not on the PATH) on that machine.";
+  const line = (err || "").split("\n").map((l) => l.trim()).find((l) => l && !/^at |^node:|^\^|^throw/.test(l));
+  return (line || "Cannot read the board.").slice(0, 160);
+}
+
 function findNode(node, id) {
   if (node?.id === id) return node;
   for (const child of node?.children ?? []) { const f = findNode(child, id); if (f) return f; }
@@ -118,7 +129,7 @@ export default class HerdrBoard extends View {
     cx.spawn(async (cx) => {
       const r = await cli(cfg(), ["ls", "--json"]);
       this.loading = false;
-      if (!r.ok) { this.error = r.err || "cannot read the board"; cx.notify(); return; }
+      if (!r.ok) { this.error = explain(r.err); cx.notify(); return; }
       try { this.data = JSON.parse(r.out); this.error = ""; } catch { this.error = "the board answered something that isn't JSON"; }
       this.announce();
       this.nameTabs();
@@ -376,7 +387,18 @@ export default class HerdrBoard extends View {
     });
     this.script = InputState.new({ value: s.script });
     this.boardDir = InputState.new({ value: s.board });
+    // the paths apply like every other setting: shortly after typing stops, and on closing
+    const later = (_e, cx) => { this.pending?.cancel(); this.pending = cx.timer.after(800, () => this.savePaths()); };
+    this.script.on("change", later);
+    this.boardDir.on("change", later);
   }
+
+  savePaths() {
+    const script = this.script.value().trim(), board = this.boardDir.value().trim();
+    if (script !== S().script || board !== S().board) setS({ script, board });
+  }
+
+  closeSettings() { this.pending?.cancel(); this.savePaths(); closeOverlay(props().overlay); }
 
   // Moves the board to the other slot; it stays shown or hidden as it was.
   setPosition(pos) {
@@ -421,7 +443,7 @@ export default class HerdrBoard extends View {
     const machineList = [...new Set([s.machine, ...machines().map((m) => m.name ?? "")])];
 
     return v_flex().id("settings").size_full().bg(t.popover).text_color(t.foreground)
-      .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); } })
+      .on_key_down((e, cx) => { if (e.key === "escape") { this.closeSettings(); cx.stop_propagation(); } })
       .child(h_flex().px(18).h(48).flex_shrink_0().items_center().border_b(1).border_color(t.border)
         .child(div().flex_1().text_size(15).font_semibold().child("Board settings"))
         .child(div().text_size(11).text_color(t.dim).child("Changes apply at once")))
@@ -447,8 +469,7 @@ export default class HerdrBoard extends View {
       .child(row("Board folder", "Holds board.json and cards/", field(this.boardDir))))
       .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.msg === "Saving…" ? t.muted : t.blocked).child(this.msg))
-        .child(button("s-paths", "Save paths", () => setS({ script: this.script.value().trim(), board: this.boardDir.value().trim() }), { tip: "Use these paths for the board" }))
-        .child(button("s-close", "Done", () => closeOverlay(p.overlay), { primary: true })));
+        .child(button("s-close", "Done", () => this.closeSettings(), { primary: true })));
   }
 
   // ---------- dialog: card editor ----------
