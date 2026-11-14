@@ -293,7 +293,7 @@ export default class HerdrBoard extends View {
 
   newCard() {
     const boards = this.boards().filter((b) => b.data).map((b) => ({ conn: b.conn, label: b.label, repos: b.data.repos ?? {} }));
-    openOverlay({ mod: "herdr-board", kind: "dialog", width: 460, props: { dialog: "new", boards } });
+    openOverlay({ mod: "herdr-board", kind: "dialog", modal: true, width: 640, height: 0.9, props: { dialog: "new", boards } });
   }
 
   openSettings() {
@@ -755,6 +755,15 @@ export default class HerdrBoard extends View {
     this.pick = b ? { b: props().boards.indexOf(b), repo: Object.keys(b.repos)[0] } : null;
     this.title = "";
     this.msg = "";
+    this.done = "pr-ready";
+    this.model = "";          // "" = let the planner propose
+    this.effort = "";
+    this.approved = false;
+    const area = () => EditorState.new({ language: "markdown", value: "", soft_wrap: true, line_numbers: false, folding: false,
+      font_family: settings().font_family, font_size: 13 });
+    this.context = area();
+    this.constraints = area();
+    this.doneLooks = area();
     this.input = InputState.new({ value: "" });
     this.input.on("change", (_e, cx) => { this.title = this.input.value(); cx.notify(); });
     this.input.on("submit", (_e, cx) => this.create(cx));
@@ -765,15 +774,19 @@ export default class HerdrBoard extends View {
   create(cx) {
     const p = props();
     if (!this.pick || !this.title.trim()) { this.msg = "Pick a repo and write a title."; cx.notify(); return; }
+    const fields = encodeURIComponent(JSON.stringify({
+      done: this.done, model: this.model, effort: this.effort, approved: this.approved,
+      context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
+    }));
+    if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it, or edit the card afterwards."; cx.notify(); return; }
+    this.msg = "Creating…";
+    cx.notify();
     cx.spawn(async (cx) => {
       const c = p.boards[this.pick.b].conn;
-      const r = await cli(c, ["new", this.pick.repo, this.title.trim()]);
+      const r = await cli(c, ["new", this.pick.repo, this.title.trim(), "--fields", fields]);
       if (!r.ok) { this.msg = r.err; cx.notify(); return; }
-      const [id, path] = r.out.split(/\s+/);
       setShared(BUMP, Date.now());
       closeOverlay(p.overlay);
-      openOverlay({ mod: "herdr-board", kind: "dialog", modal: true, width: 0.7, height: 0.85,
-        props: { dialog: "edit", ...c, id, path, column: "todo" } });
     });
   }
 
@@ -781,28 +794,57 @@ export default class HerdrBoard extends View {
     const t = theme();
     const p = props();
     const boards = p.boards ?? [];
-    const chips = (b, bi) => h_flex().gap(6).flex_wrap().children(Object.entries(b.repos).map(([name, color]) => {
+    const repoChips = (bd, bi) => h_flex().gap(6).flex_wrap().children(Object.entries(bd.repos).map(([name, color]) => {
       const on = this.pick?.b === bi && this.pick.repo === name;
       return h_flex().id(`repo-${bi}-${safeId(name)}`).h(26).px(10).gap(6).items_center().rounded(7).cursor_pointer()
         .border_1().border_color(on ? color : t.border).bg(on ? t.selected : t.raised)
         .on_click((_e, cx) => { this.pick = { b: bi, repo: name }; cx.notify(); })
         .child(div().w(8).h(8).rounded_full().bg(color)).child(div().text_size(12).child(name));
     }));
-    return v_flex().id("new").w_full().p(18).gap(10).bg(t.popover).text_color(t.foreground)
+    const chip = (id, options, current, pick) => h_flex().gap(4).flex_wrap().children(options.map(([v, label, color]) =>
+      h_flex().id(`${id}-${v}`).h(26).px(10).gap(6).items_center().rounded(7).cursor_pointer().text_size(12)
+        .border_1().border_color(current === v ? (color ?? t.accent) : t.border).bg(current === v ? t.selected : t.raised)
+        .text_color(current === v ? t.foreground : t.muted)
+        .on_click((_e, cx) => { pick(v); cx.notify(); })
+        .when(Boolean(color), (el) => el.child(div().w(8).h(8).rounded_full().bg(color)))
+        .child(label)));
+    const label = (text, hint) => h_flex().gap(8).items_center().pt(8)
+      .child(div().text_size(11.5).font_semibold().text_color(t.muted).child(text))
+      .when(Boolean(hint), (el) => el.child(div().text_size(11).text_color(t.dim).child(hint)));
+    const area = (state, h) => div().h(h).flex_shrink_0().rounded(8).border_1().border_color(t.input).bg(t.background).p(6)
+      .child(Editor.new(state).size_full());
+    return v_flex().id("new").size_full().bg(t.popover).text_color(t.foreground)
       .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); } })
-      .child(div().text_size(15).font_semibold().child("New card"))
-      .child(div().text_size(11.5).text_color(t.dim).child("Repo"))
-      // with several boards, their repos are grouped under each board's name
-      .children(boards.length > 1
-        ? boards.map((b, bi) => v_flex().gap(4).child(div().text_size(11).font_semibold().text_color(t.muted).child(b.label)).child(chips(b, bi)))
-        : boards.map(chips))
-      .when(!boards.length, (el) => el.child(div().text_size(12).text_color(t.blocked).child("No board could be read yet. Check ⚙ → Boards.")))
-      .child(div().text_size(11.5).text_color(t.dim).child("Title"))
-      .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8))
-      .child(div().text_size(11.5).text_color(this.msg ? t.blocked : t.dim)
-        .child(this.msg || "Next you fill in context, constraints and what done looks like."))
-      .child(h_flex().pt(6).gap(8).justify_end()
+      .child(h_flex().px(18).h(48).flex_shrink_0().items_center().border_b(1).border_color(t.border)
+        .child(div().flex_1().text_size(15).font_semibold().child("New card"))
+        .child(div().text_size(11).text_color(t.dim).child("Esc closes without creating")))
+      .child(v_flex().id("new-body").flex_1().min_h(0).px(18).pb(12).gap(4).overflow_y_scrollbar()
+        .child(label("Repo"))
+        // with several boards, their repos are grouped under each board's name
+        .children(boards.length > 1
+          ? boards.map((bd, bi) => v_flex().gap(4).child(div().text_size(11).font_semibold().text_color(t.muted).child(bd.label)).child(repoChips(bd, bi)))
+          : boards.map(repoChips))
+        .when(!boards.length, (el) => el.child(div().text_size(12).text_color(t.blocked).child("No board could be read yet. Check ⚙ → Boards.")))
+        .child(label("Title"))
+        .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8))
+        .child(label("Context", "Why it matters, what you know, links, files to look at"))
+        .child(area(this.context, 110))
+        .child(label("Constraints", "What the agent must not do or change"))
+        .child(area(this.constraints, 70))
+        .child(label("Done looks like", "What you will check to call it done"))
+        .child(area(this.doneLooks, 70))
+        .child(label("Finish with", "How far the agent takes it"))
+        .child(chip("done", [["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]],
+          this.done, (v) => { this.done = v; }))
+        .child(label("Model", "Auto: the planner proposes"))
+        .child(chip("model", [["", "Auto"], ["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], this.model, (v) => { this.model = v; }))
+        .child(label("Effort", "Auto: the planner proposes"))
+        .child(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; }))
+        .child(label("Start", "Without approval the card waits for you in To do"))
+        .child(chip("appr", [[false, "Wait for my approval"], [true, "Start as soon as a slot is free"]], this.approved, (v) => { this.approved = v; })))
+      .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.msg === "Creating…" ? t.muted : t.blocked).child(this.msg))
         .child(button("n-cancel", "Cancel", () => closeOverlay(p.overlay)))
-        .child(button("n-create", "Create and edit", (cx) => this.create(cx), { primary: true })));
+        .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true })));
   }
 }
