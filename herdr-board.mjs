@@ -4,7 +4,7 @@
 // No packages: Node's standard library only.
 //
 //   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | approve <id> [--model m] [--effort e] | unapprove <id> | next | start <id>
-//           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
+//           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | resume <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] [--pr <url>] "<summary>"
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
@@ -14,6 +14,7 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATUSES = ['todo', 'ready', 'running', 'needs-you', 'done', 'archived'];
@@ -73,7 +74,10 @@ function hcEnv(board) {
 
 function hc(board, args, { json = true, allowFail = false } = {}) {
   // --json right after the subcommand: anything after "--" belongs to the program hc starts
-  const r = spawnSync('hc', json ? [args[0], '--json', ...args.slice(1)] : args, { env: hcEnv(board), encoding: 'utf8' });
+  const hcArgs = json ? [args[0], '--json', ...args.slice(1)] : args;
+  // tests point HERDR_BOARD_HC_SCRIPT at a fake hc (a node script), so no real Herdr session is touched
+  const r = process.env.HERDR_BOARD_HC_SCRIPT ? spawnSync(process.execPath, [process.env.HERDR_BOARD_HC_SCRIPT, ...hcArgs], { env: hcEnv(board), encoding: 'utf8' })
+    : spawnSync('hc', hcArgs, { env: hcEnv(board), encoding: 'utf8' });
   if (r.status !== 0 && !allowFail) die(`hc ${args.join(' ')} failed: ${(r.stderr || r.stdout || '').trim()}`);
   if (!json) return r.stdout;
   try { return JSON.parse(r.stdout); } catch { return allowFail ? null : die(`hc ${args[0]}: not JSON: ${r.stdout}`); }
@@ -227,7 +231,7 @@ function clip(text) {
 }
 // ls runs often: the answer is kept per card in <board>/.last-message and reused while the transcript is unchanged.
 function lastMessageFromTranscript(worktree, cacheFile) {
-  const dir = join(homedir(), '.claude', 'projects', String(worktree).replace(/[^A-Za-z0-9]/g, '-'));
+  const dir = claudeProjectDir(worktree);
   let newest = null;
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.jsonl') || f.startsWith('agent-')) continue;
@@ -312,7 +316,7 @@ function screenOptions(screen) {
 // The transcript is ~/.claude/projects/<cwd, every non-alphanumeric char as ->/*.jsonl on the machine running the agent.
 function pendingAsk(cwd) {
   try {
-    const dir = join(homedir(), '.claude', 'projects', String(cwd).replace(/[^A-Za-z0-9]/g, '-'));
+    const dir = claudeProjectDir(cwd);
     const files = readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => ({ f, t: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
     if (!files.length) return null;
     const file = join(dir, files[0].f);
@@ -532,7 +536,7 @@ function cmdLs(board, args) {
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
-      done: c.meta.done || '', outcome: ['done', 'archived'].includes(c.meta.status) ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '', autoChoice: c.meta.auto_choice || '',
+      done: c.meta.done || '', outcome: ['done', 'archived'].includes(c.meta.status) ? (c.meta.outcome || 'reached') : '', session: c.meta.session || '', model: c.meta.model || '', effort: c.meta.effort || '', autoChoice: c.meta.auto_choice || '',
       approved: c.meta.approved === 'true',
       where: whereOf(c), questions: questionsOf(c),
       prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
@@ -781,12 +785,25 @@ function git(args, opts = {}) {
 }
 function gitWhy(e) { return String(e.stderr || e.message).trim().split('\n')[0]; }   // first line of git's error
 
+// Starts the card's claude in its worktree as a named hc terminal. `claudeArgs` go right after "claude"
+// (--session-id or --resume), `tail` after the board's own options (the opening prompt).
+function launchAgent(board, card, wt, claudeArgs, tail) {
+  const name = termName(card.id);
+  const rules = renderRules(board, card);
+  const args = ['run', '--bg', '--no-parent', '--outlive-parent', '--name', name, '--cwd', wt,
+    '--label', `card=${card.id}`];
+  if (board.space) args.push('--label', `herdr.space=${board.space}`);
+  args.push('--', 'claude', ...claudeArgs, '--model', card.meta.model, '--effort', card.meta.effort, '--permission-mode', board.permissionMode || 'auto',
+    '-n', `${card.id} ${card.meta.title}`.slice(0, 60),
+    '--add-dir', slash(board.dir), '--append-system-prompt-file', rules, ...tail);
+  hc(board, args);
+  acceptTrustPrompt(board, name);
+}
+
 function startCard(board, card) {
   const repo = board.repos[card.meta.repo];
   if (!repo) die(`${card.id}: unknown repo "${card.meta.repo}"`);
   chooseAuto(board, card);
-  const model = card.meta.model;
-  const effort = card.meta.effort;
   const name = termName(card.id);
   if (liveTerminals(board)[name]) die(`${card.id}: its agent (${name}) is already running`);
   hc(board, ['rm', name], { json: false, allowFail: true });   // a finished one with the same name
@@ -814,21 +831,13 @@ function startCard(board, card) {
 
   allowShipCommands(wt, card);
 
-  const rules = renderRules(board, card);
   const brief = `You are the agent for card ${card.id} ("${card.meta.title}"). Read your card first: ${slash(card.path)}. Then work it to its "done" target, following your card rules.`;
-  const args = ['run', '--bg', '--no-parent', '--outlive-parent', '--name', name, '--cwd', wt,
-    '--label', `card=${card.id}`];
-  if (board.space) args.push('--label', `herdr.space=${board.space}`);
-  args.push('--', 'claude', '--model', model, '--effort', effort, '--permission-mode', board.permissionMode || 'auto',
-    '-n', `${card.id} ${card.meta.title}`.slice(0, 60),
-    '--add-dir', slash(board.dir), '--append-system-prompt-file', rules, brief);
-  hc(board, args);
-  acceptTrustPrompt(board, name);
+  const session = randomUUID();   // fixed here so Resume knows which transcript is this card's
+  launchAgent(board, card, wt, ['--session-id', session], [brief]);
+  card.meta.session = session;
 
   card.meta.status = 'running';
   card.meta.active_ms = String(Date.now());
-  card.meta.model = model;
-  card.meta.effort = effort;
   card.meta.started = now();
   delete card.meta.start_error;
   card.meta.branch = branch;
@@ -1118,6 +1127,72 @@ function cmdClean(board, args) {
   console.log(`${card.id}: ${did.join(', ')}${note ? '. ' + note : ''}`);
 }
 
+// Resume: an archived card gets its worktree back (from the local branch, else the remote one) and its agent
+// continues the saved conversation (claude --resume <session>). The card goes back to Done; the usual "agent is busy"
+// check moves it to Running when the agent works again. Never into a worktree with uncommitted changes.
+function claudeProjectDir(wt) { return join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects', String(wt).replace(/[^A-Za-z0-9]/g, '-')); }
+function cmdResume(board, [id]) {
+  if (!id) die('usage: resume <id>   (archived cards only)');
+  const card = loadCard(board, id);
+  if (card.meta.status !== 'archived') die(`${card.id} is ${card.meta.status || 'todo'}: only an archived card can be resumed`);
+  const repo = board.repos[card.meta.repo];
+  if (!repo) die(`${card.id}: unknown repo "${card.meta.repo}"`);
+  const session = card.meta.session;
+  if (!session) die(`${card.id}: no saved session (it was archived before sessions were saved): cannot resume its conversation`);
+  const wt = slash(resolve(board.worktrees, card.id));
+  const branch = card.meta.branch || `card/${card.id}`;
+  const transcript = join(claudeProjectDir(wt), `${session}.jsonl`);
+  if (!existsSync(transcript)) die(`${card.id}: the conversation file for session ${session} is gone (${transcript}): cannot resume`);
+  if (liveTerminals(board)[termName(card.id)]) die(`${card.id}: its agent (${termName(card.id)}) is already running`);
+
+  if (existsSync(wt)) {
+    let dirty = '';
+    try { dirty = git(['-C', wt, 'status', '--porcelain']); } catch (e) { die(`${card.id}: ${wt} exists but is not a usable git worktree (${gitWhy(e)}); left alone`); }
+    let head = '';
+    try { head = git(['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']); } catch { /* reported above */ }
+    if (head !== branch) die(`${card.id}: ${wt} already exists but is on "${head}", not ${branch}; not resuming into it`);
+    if (dirty) die(`${card.id}: ${wt} already exists with uncommitted changes (${dirty.split('\n').slice(0, 5).join('; ')}); not resuming into it. Commit or discard them, then resume again`);
+  } else {
+    try { git(['-C', repo.path, 'worktree', 'prune']); } catch { /* the add reports any real problem */ }
+    let local = true;
+    try { git(['-C', repo.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]); } catch { local = false; }
+    if (local) git(['-C', repo.path, 'worktree', 'add', wt, branch]);
+    else {
+      let remote = true, fetchWhy = '';
+      try { git(['-C', repo.path, 'fetch', '--quiet', 'origin', branch], { env: { ...process.env, LC_ALL: 'C' } }); } catch (e) { remote = false; fetchWhy = gitWhy(e); }
+      // a fetch that failed for another reason (offline, auth) does not prove the branch is gone: say so, leave the card alone
+      if (!remote && !/couldn't find remote ref|does not appear to be a git repository|No such remote/i.test(fetchWhy)) die(`${card.id}: could not fetch ${branch} from origin: ${fetchWhy}`);
+      if (remote) try { git(['-C', repo.path, 'rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`]); } catch { remote = false; }
+      if (!remote) {
+        const w = whereOf(card);
+        setSection(card, 'Where we are', `- Goal: ${w.goal}
+- Done: ${w.done}
+- Next: cannot resume: branch ${branch} is gone locally and on origin`);
+        saveCard(card);   // `updated` is the archive date (sorts the Archived column): not touched by a failed resume
+        die(`${card.id}: branch ${branch} is gone locally and on origin: not recreating the worktree from nothing`);
+      }
+      git(['-C', repo.path, 'worktree', 'add', '-b', branch, wt, `origin/${branch}`]);
+    }
+  }
+
+  allowShipCommands(wt, card);
+  hc(board, ['rm', termName(card.id)], { json: false, allowFail: true });
+  launchAgent(board, card, wt, ['--resume', session], []);
+  const w = whereOf(card);
+  card.meta.status = 'done';
+  card.meta.outcome = card.meta.outcome || 'reached';
+  card.meta.done_ms = String(Date.now());
+  card.meta.worktree = wt;
+  card.meta.branch = branch;
+  delete card.meta.busy_ms;
+  setSection(card, 'Where we are', `- Goal: ${w.goal}
+- Done: ${w.done}
+- Next: resumed from the archive (worktree recreated, conversation continued)`);
+  card.meta.updated = now();
+  saveCard(card);
+  console.log(`${card.id}: resumed as ${termName(card.id)} (session ${session})`);
+}
+
 // ---------- main ----------
 
 // The tests import this file for its functions. Node 24.2+ tells whether this file was started directly
@@ -1130,7 +1205,7 @@ function main() {
   const [cmd, ...rest] = argv;
   const commands = {
     new: cmdNew, draft: cmdDraft, ls: cmdLs, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
-    answer: cmdAnswer, press: cmdPress, clean: cmdClean, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+    answer: cmdAnswer, press: cmdPress, clean: cmdClean, resume: cmdResume, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
   };
   if (!cmd || !commands[cmd]) {
     console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
