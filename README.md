@@ -1,7 +1,126 @@
 # herdr-board
 
-A small kanban of Claude Code agents for Herdr. Each card is a Markdown file. Each running card is
-a normal, interactive Claude Code session (a named `hc` terminal) in its own git worktree, on the machine that holds
+**A kanban board where every card is a Claude Code agent.**
+
+You write what you want on a card. herdr-board starts a real, interactive [Claude Code](https://claude.com/claude-code)
+session for it, in its own git worktree, and keeps it on track. The agent works alone, tells you in a few lines where
+it is, asks all its questions at once when it is stuck, and stops at the "done" target you chose (a local commit, a
+draft PR, a merged PR...). You run several cards at once and look only at the ones that need you.
+
+![The herdr-board panel in Herdr](herdr-board/preview.png)
+
+- **Every card is a Markdown file.** Plain text, easy to read, edit, and version.
+- **Every agent is a normal session.** Open it from the card at any time and type into it: your words win over the card.
+- **Every card has its own worktree and branch** (`card/<id>`), so agents never step on each other or on your checkout.
+- **No database, no packages.** One Node file (`herdr-board.mjs`) and a panel for Herdr.
+
+## How it works
+
+```mermaid
+flowchart LR
+  you([You]) -- "click + / Start / Answer" --> panel
+  subgraph laptop [Where you work]
+    panel["Herdr panel<br/>(herdr-board mod)"]
+  end
+  subgraph server [Machine with the repos - can be the same computer]
+    cli["herdr-board.mjs<br/>(the CLI, owns the cards)"]
+    cards[("board/cards/*.md<br/>one file per card")]
+    hc["hc terminals<br/>(herdr-core)"]
+    wt["git worktree per card<br/>branch card/ID"]
+    agent["Claude Code session<br/>= the card's agent"]
+  end
+  panel -- "runs node herdr-board.mjs ...<br/>(locally, or hc exec over ssh)" --> cli
+  cli <--> cards
+  cli -- "starts / reads / types into" --> hc
+  hc --> agent
+  agent --- wt
+  agent -- "where / ask / done" --> cli
+```
+
+The panel is only a **view**: every button runs a command of the CLI, which reads and writes the card files and drives
+the terminals through `hc`. Nothing else holds state, so you can also run everything from a shell (see [Commands](#commands)).
+
+### The life of a card
+
+```mermaid
+stateDiagram-v2
+  [*] --> todo: new
+  todo --> ready: plan + approve
+  ready --> running: start (free slot)
+  todo --> running: approved + free slot
+  running --> needs_you: agent asks, or is stuck
+  needs_you --> running: you answer
+  running --> done: agent calls done
+  done --> running: you talk to the session again
+  done --> archived: clean
+  archived --> [*]
+  needs_you: needs-you
+```
+
+1. **Write** a card: Context, Constraints, and "Done looks like". **Create with agent** can help you fill it in.
+2. **Plan** (optional): a one-shot Claude suggests the model, effort and order. **Approve** the card.
+3. **Start**: when a slot is free (`maxParallel`), the CLI creates the worktree, opens a terminal, starts Claude Code and
+   gives it the card and the rules in `rules.md`. Auto-start can do this for you.
+4. **Work**: the agent keeps three short lines up to date (◎ goal, ✓ done, → next) so you can get back into the topic in seconds.
+5. **Ask**: if blocked, it sends all its questions in one go; the card moves to **Needs you**. You answer on the card,
+   the answers go to the live session, and it continues.
+6. **Done**: it reaches the card's target (below) and reports what changed. The session stays open if you want to come back.
+7. **Clean**: removes the worktree and branch and archives the card.
+
+### The done targets
+
+Each card says how far the agent must go:
+
+| Target | The agent stops when |
+|---|---|
+| `none` | it has answered (investigation, Q&A) |
+| `local` | the change is committed on its branch |
+| `local-reviewed` | committed and reviewed by itself |
+| `draft-pr` | the branch is pushed and a draft PR is open |
+| `pr-ready` | the PR is reviewed and its checks pass |
+| `merged` | the PR is merged |
+
+### A card, as a file
+
+```markdown
+---
+id: API-12
+title: Add rate limiting
+repo: billing-api
+status: running
+done: draft-pr
+model: sonnet
+---
+
+## Context
+Clients can hammer /charge. Add a per-key limit.
+
+## Constraints
+- Do not change the public response format.
+
+## Done looks like
+A limit of 60 requests/min per key, with tests.
+
+## Where we are
+◎ Add per-key rate limit   ✓ Middleware written   → Write tests
+```
+
+The tool rewrites a **Next action** section at the top of each card, so you always know whether something is on you.
+
+## Quick start
+
+1. Install Herdr, `hc`, Node 18+, git and Claude Code (and `gh` for pull-request targets). See [What you need](#what-you-need).
+2. Try it on **one computer**: leave Machine empty in the panel settings and point *Board CLI* at `herdr-board.mjs` in this checkout.
+3. Create a board folder with a `board.json` that lists your repos ([example](#boardjson)).
+4. Run `./install.sh`, pick the `board` layout with `Ctrl+Shift+L`, open ⚙ → Boards and fill in the paths.
+5. Click **+**, write a card, **Plan**, approve, **▶ Start next**.
+
+For a separate machine, run `./deploy.sh <machine> <folder>` to copy the CLI there.
+
+---
+
+# Reference
+
 the repos. You can open any card's session in Herdr and type into it at any time.
 
 ## What you need
