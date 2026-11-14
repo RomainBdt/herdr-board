@@ -143,6 +143,7 @@ function nextActionOf(card) {
   }
   if (status === 'done') {
     switch (target) {
+      case 'report': return '**You:** read the answer in the Result. No git changes to review.';
       case 'local': return `**You:** the change is committed on branch \`${card.meta.branch || 'card/' + id}\`. Review it and merge or push it yourself.`;
       case 'local-reviewed': return `**You:** committed and self-reviewed on branch \`${card.meta.branch || 'card/' + id}\`. Review it, then merge or push it yourself.`;
       case 'draft-pr': return '**You:** review the draft pull request (link in Result), mark it ready and merge it.';

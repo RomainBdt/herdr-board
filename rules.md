@@ -36,6 +36,7 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
 
 ## Reaching the "done" target (the card's `done:` field)
 
+- `report`: no git state. Investigate or answer the question, and put the findings in the `done` summary. Do not commit or push.
 - `local`: the change is committed on your branch. No review, no push.
 - `local-reviewed`: committed, then review your own diff with fresh eyes (run `/code-review` if available), fix what it
   finds, commit again. No push.

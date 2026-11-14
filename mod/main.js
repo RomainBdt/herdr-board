@@ -11,10 +11,10 @@ const COLUMNS = [
   ["todo", "To do"], ["ready", "Ready"], ["running", "Running"], ["needs-you", "Needs you"], ["done", "Done"], ["archived", "Archived"],
 ];
 // the board's "done:" targets and their labels (the New card chips and the Done tag both use them)
-const FINISH_WITH = [["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]];
+const FINISH_WITH = [["report", "Report only"], ["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]];
 const REACHED = Object.fromEntries(FINISH_WITH);
 // one color per reached state, so the Done tags are told apart at a glance
-const REACHED_COLOR = { local: "#7aa2f7", "local-reviewed": "#2ac3de", "draft-pr": "#bb9af7", "pr-ready": "#e0af68", merged: "#4ade80" };
+const REACHED_COLOR = { report: "#9ece6a", local: "#7aa2f7", "local-reviewed": "#2ac3de", "draft-pr": "#bb9af7", "pr-ready": "#e0af68", merged: "#4ade80" };
 const BUMP ="herdr-board.bump";     // dialogs set it after a change so the board refreshes at once
 
 // same as textHash in herdr-board.mjs: the editor sends it back so a card an agent changed isn't overwritten
