@@ -847,6 +847,7 @@ export default class HerdrBoard extends View {
     this.effort = "";
     this.approved = false;
     this.creating = false;
+    this.created = "";        // id of a card already made by this form (see create)
     // Plain text areas (same font as the Title field); Tab walks Title -> Context -> Constraints -> Done looks like.
     this.context = TextareaState.new({ value: "" });
     this.constraints = TextareaState.new({ value: "" });
@@ -899,13 +900,17 @@ export default class HerdrBoard extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       const c = p.boards[this.pick.b].conn;
-      const r = await cli(c, ["new", this.pick.repo, this.title.trim(), "--fields", fields]);
-      if (!r.ok) { this.creating = false; this.msg = r.err; cx.notify(); return; }
+      let id = this.created;   // set when an earlier Create and start made the card but could not start it: retry only the start
+      if (!id) {
+        const r = await cli(c, ["new", this.pick.repo, this.title.trim(), "--fields", fields]);
+        if (!r.ok) { this.creating = false; this.msg = r.err; cx.notify(); return; }
+        id = this.created = String(r.out).trim().split(/\s+/)[0];
+      }
       if (startNow) {
-        const id = String(r.out).trim().split(/\s+/)[0];
         const s = await cli(c, ["start", id], 90000);
-        if (!s.ok) {
-          // the card exists and is approved: it will start when a slot is free, or with Start
+        // an auto-start tick may have started the (approved) card between `new` and `start`: that is a success
+        if (!s.ok && !/already running/.test(s.err)) {
+          // the card exists and is approved: it will start when a slot is free, or press Create and start again
           setShared(BUMP, Date.now());
           this.creating = false; this.msg = `${id} was created but did not start: ${s.err}`; cx.notify(); return;
         }
