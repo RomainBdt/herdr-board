@@ -225,3 +225,24 @@ describe('rules.md: merged target', () => {
     assert.equal((rules.match(/--delete/g) || []).length, 1);   // no other target deletes a branch
   });
 });
+
+describe('rules.md: unfixed review findings', () => {
+  const rules = readFileSync(join(ROOT, 'rules.md'), 'utf8');
+  const sec = rules.split(/\r?\n## /).find(s => s.startsWith('Review findings that are not fixed'));
+  test('every confirmed unfixed finding becomes a deduplicated issue, linked in PR and summary', () => {
+    assert.ok(sec, 'section exists');
+    assert.match(sec, /confirmed valid/);
+    assert.match(sec, /gh issue create/);
+    assert.match(sec, /gh issue list/);
+    assert.match(sec, /duplicate/);
+    assert.match(sec, /false positives/);
+    assert.match(sec, /PR note/);
+    assert.match(sec, /`done` summary/);
+    assert.match(sec, /no remote/);
+    assert.match(readFileSync(join(ROOT, 'herdr-board.mjs'), 'utf8'), /Bash[(]gh issue list:[*][)]/);   // agents may run the dedup search
+  });
+  test('local-reviewed points to it', () => {
+    const lr = rules.split(/\r?\n- `/).find(l => l.startsWith('local-reviewed`'));
+    assert.match(lr, /Review findings that are not fixed/);
+  });
+});
