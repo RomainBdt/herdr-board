@@ -603,6 +603,7 @@ function cmdConfig(board, [key, value]) {
   } else if (Object.values(CLEAN_KEYS).includes(key)) {
     if (!['on', 'off'].includes(value)) die(`${key} must be on or off`);
     const part = Object.keys(CLEAN_KEYS).find(k => CLEAN_KEYS[k] === key);
+    raw.clean = { worktree: true, branch: true, archive: true, ...(raw.clean || {}), [part]: value === 'on' };
   } else die('usage: config maxParallel <1-10> | plannerModel <haiku|sonnet|opus> | autoStart <on|off> | autoInterval <minutes> | cleanWorktree|cleanBranch|cleanArchive <on|off>');
   writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
   console.log(`${key} = ${['autoStart', 'autoInterval', ...Object.values(CLEAN_KEYS)].includes(key) ? value : raw[key]}`);
