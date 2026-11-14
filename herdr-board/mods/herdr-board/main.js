@@ -961,7 +961,7 @@ export default class HerdrBoard extends View {
     this.model = "";          // "" = the default (sonnet / medium)
     this.effort = "";
     this.creating = false;
-    this.busy = "";
+    this.formBusy = "";
     this.created = "";        // id of a card already made by this form (see create)
     // Plain text areas (same font as the Title field); Tab walks Title -> Context -> Constraints -> Done looks like.
     this.context = TextareaState.new({ value: "" });
@@ -1023,7 +1023,7 @@ export default class HerdrBoard extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       const r = await cli(p, ["update", p.id, "--hash", this.form.hash, "--fields", fields]);
-      if (!r.ok) { this.creating = false; this.busy = ""; this.msg = r.err; cx.notify(); return; }
+      if (!r.ok) { this.creating = false; this.formBusy = ""; this.msg = r.err; cx.notify(); return; }
       setShared(BUMP, Date.now());
       closeOverlay(p.overlay);
     });
@@ -1064,7 +1064,7 @@ export default class HerdrBoard extends View {
     }));
     if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it, or edit the card afterwards."; cx.notify(); return; }
     this.creating = true;
-    this.busy = startNow ? "start" : "create";
+    this.formBusy = startNow ? "start" : "create";
     this.msg = startNow ? "Creating and starting…" : "Creating…";
     cx.notify();
     cx.spawn(async (cx) => {
@@ -1072,7 +1072,7 @@ export default class HerdrBoard extends View {
       let id = this.created;   // set when an earlier Create and start made the card but could not start it: retry only the start
       if (!id) {
         const r = await cli(c, ["new", this.pick.repo, this.title.trim(), "--fields", fields]);
-        if (!r.ok) { this.creating = false; this.busy = ""; this.msg = r.err; cx.notify(); return; }
+        if (!r.ok) { this.creating = false; this.formBusy = ""; this.msg = r.err; cx.notify(); return; }
         id = this.created = String(r.out).trim().split(/\s+/)[0];
       }
       setShared(BUMP, Date.now());   // the card shows up on the board at once
@@ -1099,13 +1099,13 @@ export default class HerdrBoard extends View {
     }));
     if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it first."; cx.notify(); return; }
     this.creating = true;
-    this.busy = "help";
+    this.formBusy = "help";
     this.msg = "Starting the agent…";
     cx.notify();
     cx.spawn(async (cx) => {
       const c = p.boards[this.pick.b].conn;
       const r = await cli(c, ["draft", this.pick.repo, this.title.trim(), "--fields", fields], 90000);
-      if (!r.ok) { this.creating = false; this.busy = ""; this.msg = r.err; cx.notify(); return; }
+      if (!r.ok) { this.creating = false; this.formBusy = ""; this.msg = r.err; cx.notify(); return; }
       closeOverlay(p.overlay);
       try { run("agent.focus", { terminal: c.machine ? `${c.machine}/${r.out}` : r.out }); } catch { /* the agent is in Herdr anyway */ }
     });
@@ -1185,8 +1185,8 @@ export default class HerdrBoard extends View {
         .child(button("n-cancel", this.existing && this.locked ? "Close" : "Cancel", () => closeOverlay(p.overlay)))
         .when(this.existing, (el) => el.child(button("n-text", "Edit as text", () => this.editText(), { tip: "Open the card's Markdown file" }))
           .when(!this.locked && this.loaded, (e2) => e2.child(button("n-save", "Save", (cx) => this.saveForm(cx), { primary: true }))))
-        .when(!this.existing, (el) => el.child(button("n-help", this.busy === "help" ? "Starting…" : "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields", dim: this.creating && this.busy !== "help" }))
-          .child(button("n-create", this.busy === "create" ? "Creating…" : "Create card", (cx) => this.create(cx), { primary: true, dim: this.creating && this.busy !== "create" }))
-          .child(button("n-start", this.busy === "start" ? "Creating and starting…" : "Create and start", (cx) => this.create(cx, true), { dim: this.creating && this.busy !== "start", primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" }))));
+        .when(!this.existing, (el) => el.child(button("n-help", this.formBusy === "help" ? "Starting…" : "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields", dim: this.creating && this.formBusy !== "help" }))
+          .child(button("n-create", this.formBusy === "create" ? "Creating…" : "Create card", (cx) => this.create(cx), { primary: true, dim: this.creating && this.formBusy !== "create" }))
+          .child(button("n-start", this.formBusy === "start" ? "Creating and starting…" : "Create and start", (cx) => this.create(cx, true), { dim: this.creating && this.formBusy !== "start", primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" }))));
   }
 }
