@@ -119,7 +119,7 @@ Skip `deploy.sh` then: set **Board CLI** to the `herdr-board.mjs` in this checko
   and the chat) and `board-top` (six columns above the tabs); the Position setting picks one.
 - `herdr-board-tabs`: a copy of Herdr's tab bar with a **Board** button next to Files and Changes. It shows or hides
   the board, with a red count of cards that need you while it is hidden. It is a copy: Herdr updates to its own tab
-  bar don't reach it (`mod-tabs/` holds it; redo the copy with `herdr-app do mod.clone` and re-add the button if
+  bar don't reach it (`herdr-board/mods/herdr-board-tabs/` holds it; redo the copy with `herdr-app do mod.clone` and re-add the button if
   Herdr's changes).
 
 Pick the layout with `Ctrl+Shift+L`. Bind `"ctrl-alt-b": "herdr-board-tabs.toggle"` in `keys.json` to show or hide
@@ -163,7 +163,7 @@ with `./deploy.sh` (or point the local board at this checkout).
 
 ## Licenses and notices
 
-herdr-board is under the license in `LICENSE`. `mod-tabs/` is a modified copy of the `tabs` mod shipped with Herdr,
+herdr-board is under the license in `LICENSE`. `herdr-board/mods/herdr-board-tabs/` is a modified copy of the `tabs` mod shipped with Herdr,
 which is under the Apache License 2.0; see `NOTICE`.
 
 ## Done tag colors
