@@ -59,6 +59,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | you | `draft <repo> ["<title>"]` | the "Create with agent" button: a chat agent asks what is missing, then makes the card with `new --fields-file` (never auto-approved) |
 | you | `plan` | a one-shot Claude proposes model/effort/order for waiting cards |
 | you | `approve <id> [--model m] [--effort e]` | ready to start (takes the proposal by default) |
+| you | `unapprove <id>` | back to To do, not approved (only before the card starts) |
 | you | `next` / `start <id>` | start queued cards up to `maxParallel` / start one now |
 | timer | `tick` | `next`, but only if `autoStart` is on and its interval has passed (the panel calls it every 30 s) |
 | you | `show <id>` / `update <id> --hash <h> --fields <enc>` | the card's form fields as JSON / change a card that has not started (what the panel's card form uses; refuses if the file changed since `show`) |
@@ -68,7 +69,8 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | agent | `where` / `ask` / `done [--state s]` | update its own card; never edits the file directly. `--state` (`reached` default, `partial`, `blocked`, `failed`, `abandoned`) decides the tag shown on a Done card: the Finish-with state reached (None, Local commit, Local + review, Draft PR, PR ready, Merged), "Blocked", or "Not reached" |
 
 `ls` also checks each running agent: a terminal that is gone, blocked on a prompt, or stopped without `ask`/`done`
-shows under **needs-you** with the reason.
+shows under **needs-you** with the reason. For a stopped agent it also shows the agent's last message (~300 characters,
+read from the end of its Claude session transcript, else from its terminal), to tell a forgotten question from an error.
 
 ## board.json
 
