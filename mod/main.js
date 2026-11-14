@@ -59,12 +59,12 @@ const SLOT_ID = { side: "board-side", top: "board-top" };   // the layout's node
 
 function vertical() { const p = props() ?? {}; return p.slot ? p.slot === "side" : S().position === "side"; }
 
-// The connections, one per board: {machine (null = this computer), script, board}.
-function norm(c) { return { machine: c?.machine || null, script: (c?.script || "").trim(), board: (c?.board || "").trim() }; }
+// The connections, one per board: {machine (null = this computer), script, board, off (switched off in the settings)}.
+function norm(c) { return { machine: c?.machine || null, script: (c?.script || "").trim(), board: (c?.board || "").trim(), off: c?.enabled === false || c?.off === true }; }
 // As saved (duplicates included); conns() is what the panel reads.
 function stored() { const s = S(); return Array.isArray(s.boards) && s.boards.length ? s.boards.map(norm) : [norm(s)]; }
 function conns() {
-  const list = stored();
+  const list = stored().filter((c) => !c.off);   // a switched-off board is kept in the settings but not read or shown
   return list.filter((c, i) => list.findIndex((o) => connKey(o) === connKey(c)) === i);   // the same board twice: once
 }
 // The panel can't read anything until a board has both its CLI path and its folder.
@@ -550,7 +550,7 @@ export default class HerdrBoard extends View {
   }
 
   makeRow(cx, c, known) {
-    const row = { n: this.serial++, machine: c.machine || "", maxParallel: known?.maxParallel ?? null,
+    const row = { n: this.serial++, enabled: !c.off, machine: c.machine || "", maxParallel: known?.maxParallel ?? null,
       plannerModel: known?.plannerModel ?? null, autoStart: known?.autoStart ?? null, clean: known?.clean ?? null, name: known?.name ?? "" };
     row.script = InputState.new({ value: c.script });
     row.boardDir = InputState.new({ value: c.board });
@@ -564,6 +564,8 @@ export default class HerdrBoard extends View {
   }
 
   rowConn(row) { return norm({ machine: row.machine, script: row.script.value(), board: row.boardDir.value() }); }
+  // what is saved for a row: its connection plus its on/off switch
+  rowSaved(row) { return { machine: row.machine, script: row.script.value().trim(), board: row.boardDir.value().trim(), enabled: row.enabled }; }
 
   // Reads the row's board.json values (after opening, adding, or changing where it points).
   loadRow(cx, row) {
@@ -583,7 +585,7 @@ export default class HerdrBoard extends View {
 
   // Writes every connection; a row that now points somewhere else reads its board again.
   saveRows(cx) {
-    const boards = this.rows.map((r) => ({ machine: r.machine, script: r.script.value().trim(), board: r.boardDir.value().trim() }));
+    const boards = this.rows.map((r) => this.rowSaved(r));
     if (JSON.stringify(boards.map(norm)) === JSON.stringify(stored())) return;   // as saved, duplicates included
     setS({ boards });
     if (cx) for (const r of this.rows) if (r.loaded !== connKey(this.rowConn(r))) this.loadRow(cx, r);
@@ -656,8 +658,9 @@ export default class HerdrBoard extends View {
     // one block per connection: where its board is, then what its board.json says
     const connection = (r, i) => v_flex().id(`conn-${r.n}`).mt(8).px(12).py(4).rounded(8).border_1().border_color(t.border)
       .child(h_flex().h(30).gap(8).items_center()
-        .child(div().flex_1().min_w(0).truncate().text_size(12.5).font_semibold()
+        .child(div().flex_1().min_w(0).truncate().text_size(12.5).font_semibold().text_color(r.enabled ? t.foreground : t.dim)
           .child(r.name ? `${r.name} · ${machineName(this.rowConn(r))}` : `Board ${i + 1} · ${machineName(this.rowConn(r))}`))
+        .child(seg(`en-${r.n}`, [[true, "On"], [false, "Off"]], r.enabled, (v, cx) => { r.enabled = v; this.saveRows(cx); }))
         .when(many, (el) => el.child(button(`rm-${r.n}`, "Remove", (cx) => { this.removeRow(cx, r); cx.notify(); }, { tone: t.muted, tip: "Stop showing this board (nothing is deleted)" }))))
       .when(this.rows.findIndex((o) => connKey(this.rowConn(o)) === connKey(this.rowConn(r))) < i,
         (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Same machine and folder as a board above: shown once.")))

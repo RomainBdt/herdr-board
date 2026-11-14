@@ -132,7 +132,7 @@ it from the keyboard (not Ctrl+B: Claude Code uses it).
 | Refresh every | 5 s, 15 s, 1 min |
 | Alerts | toast + sound when a card needs you; when one is done (off by default: Herdr already tells you) |
 | Auto-start / Auto-start every | per board, saved in its `board.json`: on or off, and 1, 5, 10, 15, 30 or 60 minutes |
-| Boards | one or more: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once, Planner model and Clean button behavior (saved in that board's `board.json` with `herdr-board config ...`) |
+| Boards | one or more, each switched On or Off independently: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once, Planner model and Clean button behavior (saved in that board's `board.json` with `herdr-board config ...`) |
 
 Display and connection settings are kept in Herdr's shared state (`herdr-board.settings`).
 
