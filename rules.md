@@ -62,6 +62,9 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
 - `draft-pr`: push the branch and open a draft pull request (`gh pr create --draft`) with a clear description.
 - `pr-ready`: run `/ship` (review + pull request), until the PR is ready to merge and its checks pass.
 - `merged`: as `pr-ready`, then merge it once checks pass and the repo's rules allow it.
+  Once the merge has succeeded (`gh pr view --json state` says `MERGED`), delete your own remote branch:
+  `git push origin --delete card/{{id}}`. Do it only after a successful merge, never for another branch, and
+  never for the other targets (those keep their branch). If the merge failed or did not happen, leave the branch alone.
 - anything else: it is written in plain words: do exactly that.
 
 Then run `done` (with `--state` if the target was not fully reached) and a summary: what changed, decisions you made alone, anything the person should check, and the

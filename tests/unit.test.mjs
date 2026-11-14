@@ -214,3 +214,14 @@ describe('small helpers', () => {
     assert.ok(c.startsWith('…') && c.endsWith('THE END') && c.length <= 300, c);
   });
 });
+
+describe('rules.md: merged target', () => {
+  const rules = readFileSync(join(ROOT, 'rules.md'), 'utf8');
+  const merged = rules.split(/\r?\n- `/).find(l => l.startsWith('merged`'));
+  test('deletes only the card\'s own remote branch, after a successful merge', () => {
+    assert.match(merged, /git push origin --delete card\/\{\{id\}\}/);
+    assert.match(merged, /after a successful merge/);
+    assert.match(merged, /If the merge failed or did not happen, leave the branch alone/);
+    assert.equal((rules.match(/--delete/g) || []).length, 1);   // no other target deletes a branch
+  });
+});
