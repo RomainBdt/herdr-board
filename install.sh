@@ -7,7 +7,10 @@ mkdir -p "$home/mods/herdr-board" "$home/mods/herdr-board-tabs"
 cp herdr-board/mods/herdr-board/main.js herdr-board/mods/herdr-board/mod.json "$home/mods/herdr-board/"
 cp herdr-board/mods/herdr-board-tabs/* "$home/mods/herdr-board-tabs/"
 cp layout/board.json "$home/layouts/board.json"
+skills="${CLAUDE_HOME:-$HOME/.claude}/skills"
+mkdir -p "$skills/card-creator"
+cp skills/card-creator/SKILL.md "$skills/card-creator/"
 rm -f "$home/layouts/board-side.json"   # older versions had a second layout
-echo "installed the board (mods herdr-board, herdr-board-tabs; layout board)."
+echo "installed the board (mods herdr-board, herdr-board-tabs; layout board; Claude Code skill card-creator)."
 echo "Pick the layout with Ctrl+Shift+L, then set the machine and paths in the board's settings (⚙)."
 echo 'Optional key: add "ctrl-alt-b": "herdr-board-tabs.toggle" to "global" in keys.json.'
