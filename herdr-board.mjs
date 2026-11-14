@@ -3,7 +3,7 @@
 // hc terminal in its own git worktree. Runs on the machine that holds the repos (the "server").
 // No packages: Node's standard library only.
 //
-//   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | plan | approve <id> [--model m] [--effort e] | unapprove <id> | next | start <id>
+//   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | approve <id> [--model m] [--effort e] | unapprove <id> | next | start <id>
 //           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] "<summary>"
 //
@@ -481,9 +481,6 @@ function cmdLs(board, args) {
       status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
       done: c.meta.done || '', outcome: c.meta.status === 'done' ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
       approved: c.meta.approved === 'true',
-      proposed: c.meta.proposed_model
-        ? { model: c.meta.proposed_model, effort: c.meta.proposed_effort, order: Number(c.meta.proposed_order) || 99, note: c.meta.plan_note || '' }
-        : null,
       where: whereOf(c), questions: questionsOf(c),
       prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
       terminal: live[termName(c.id)] ? termName(c.id) : '',
@@ -495,7 +492,7 @@ function cmdLs(board, args) {
   const running = cards.filter(c => c.column === 'running').length;   // same rule as the queue's free slots
   if (args.includes('--json')) {
     const repos = Object.fromEntries(Object.entries(board.repos).map(([k, r]) => [k, r.color || '#888888']));
-    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, plannerModel: board.plannerModel || 'sonnet', autoStart: board.autoStart, clean: board.clean, running, repos, cards }, null, 2));
+    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, autoStart: board.autoStart, clean: board.clean, running, repos, cards }, null, 2));
     return;
   }
   console.log(`${board.name || 'board'}: ${running}/${board.maxParallel} running`);
@@ -504,7 +501,7 @@ function cmdLs(board, args) {
     if (!list.length) continue;
     console.log(`\n${col.toUpperCase()} (${list.length})`);
     for (const c of list) {
-      const mod = c.model ? `${c.model}/${c.effort}` : c.proposed ? `proposed ${c.proposed.model}/${c.proposed.effort}` : '';
+      const mod = c.model ? `${c.model}/${c.effort}` : '';
       console.log(`  ${c.id.padEnd(9)} ${c.title}  [${c.repo}${mod ? ' · ' + mod : ''}]${c.note ? '  ⚠ ' + c.note : ''}`);
       if (c.lastMessage) console.log(`            “${c.lastMessage}”`);
       if (c.where.next) console.log(`            → ${c.where.next}`);
@@ -594,8 +591,8 @@ function cmdApprove(board, args) {
   const [id] = args;
   if (!id) die('usage: approve <id> [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]');
   const card = loadCard(board, id);
-  card.meta.model = model || card.meta.model || card.meta.proposed_model || 'sonnet';
-  card.meta.effort = effort || card.meta.effort || card.meta.proposed_effort || 'medium';
+  card.meta.model = model || card.meta.model || 'sonnet';
+  card.meta.effort = effort || card.meta.effort || 'medium';
   if (!MODELS.includes(card.meta.model)) die(`model must be one of ${MODELS.join(', ')}`);
   if (!EFFORTS.includes(card.meta.effort)) die(`effort must be one of ${EFFORTS.join(', ')}`);
   card.meta.approved = 'true';
@@ -621,7 +618,7 @@ function cmdUnapprove(board, args) {
 function queue(board) {
   return allCards(board)
     .filter(c => c.meta.status === 'ready' || ((c.meta.status || 'todo') === 'todo' && c.meta.approved === 'true'))
-    .sort((a, b) => (Number(a.meta.proposed_order) || 99) - (Number(b.meta.proposed_order) || 99) || a.id.localeCompare(b.id));
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 // A slot is taken only by an agent that is alive and not stopped: a crashed or stalled agent
@@ -680,8 +677,8 @@ function gitWhy(e) { return String(e.stderr || e.message).trim().split('\n')[0];
 function startCard(board, card) {
   const repo = board.repos[card.meta.repo];
   if (!repo) die(`${card.id}: unknown repo "${card.meta.repo}"`);
-  const model = card.meta.model || card.meta.proposed_model || 'sonnet';
-  const effort = card.meta.effort || card.meta.proposed_effort || 'medium';
+  const model = card.meta.model || 'sonnet';
+  const effort = card.meta.effort || 'medium';
   const name = termName(card.id);
   if (liveTerminals(board)[name]) die(`${card.id}: its agent (${name}) is already running`);
   hc(board, ['rm', name], { json: false, allowFail: true });   // a finished one with the same name
@@ -819,48 +816,11 @@ function cmdDraft(board, args) {
   const brief = `Help me create a card on the "${repo}" board. What I wrote so far:\n${given}\nAsk me what is missing, then create the card.`;
   const args2 = ['run', '--bg', '--no-parent', '--outlive-parent', '--name', name, '--cwd', slash(r.path), '--label', 'draft=1'];
   if (board.space) args2.push('--label', `herdr.space=${board.space}`);
-  args2.push('--', 'claude', '--model', board.plannerModel || 'sonnet', '--permission-mode', board.permissionMode || 'auto',
+  args2.push('--', 'claude', '--model', 'sonnet', '--permission-mode', board.permissionMode || 'auto',
     '-n', `New card: ${title || repo}`.slice(0, 60), '--add-dir', slash(board.dir), '--append-system-prompt-file', slash(rules), brief);
   hc(board, args2);
   acceptTrustPrompt(board, name);
   console.log(liveTerminals(board)[name]?.address || name);   // what the panel focuses (a card's address, not its name)
-}
-
-function cmdPlan(board, args) {
-  const model = takeFlag(args, '--model') || board.plannerModel || 'sonnet';
-  const cards = allCards(board).filter(c => ['todo', 'ready'].includes(c.meta.status || 'todo'));
-  if (!cards.length) { console.log('nothing to plan'); return; }
-  const running = allCards(board).filter(c => c.meta.status === 'running')
-    .map(c => `- ${c.id} [${c.meta.repo}] ${c.meta.title} (${c.meta.model}/${c.meta.effort})`).join('\n') || '(none)';
-  const listing = cards.map(c => {
-    const body = c.sections.filter(s => ['Context', 'Constraints', 'Done looks like'].includes(s.title))
-      .map(s => `### ${s.title}\n${s.body}`).join('\n');
-    return `## ${c.id} [repo ${c.meta.repo}] ${c.meta.title}\ndone target: ${c.meta.done}\n` +
-      (c.meta.model ? `model fixed by the person: ${c.meta.model}/${c.meta.effort}\n` : '') + body;
-  }).join('\n\n');
-  const prompt = `You plan a board of Claude Code agent cards. Up to ${board.maxParallel} run at once, each in its own git worktree.
-Running now:\n${running}\n\nCards waiting:\n\n${listing}\n
-For each waiting card choose:
-- model: haiku (small, mechanical), sonnet (most work), opus (hard design, tricky debugging, wide refactors)
-- effort: low | medium | high | xhigh (only for genuinely hard cards)
-- order: 1 = start first. Favour unblocking work, small quick wins, and cards in different repos running side by side; put cards that touch the same files of one repo apart.
-- note: one short line on why.
-Keep a model the person fixed. Reply with ONLY a JSON array: [{"id":"X-1","model":"sonnet","effort":"medium","order":1,"note":"..."}]`;
-  const r = spawnSync('claude', ['-p', '--model', model, '--output-format', 'text'], { input: prompt, encoding: 'utf8', maxBuffer: 1 << 24 });
-  if (r.status !== 0) die(`planner failed: ${r.stderr || r.stdout}`);
-  const m = r.stdout.match(/\[[\s\S]*\]/);
-  if (!m) die(`planner gave no JSON:\n${r.stdout}`);
-  const plan = JSON.parse(m[0]);
-  for (const p of plan) {
-    const card = cards.find(c => c.id === String(p.id).toUpperCase());
-    if (!card) continue;
-    card.meta.proposed_model = MODELS.includes(p.model) ? p.model : 'sonnet';
-    card.meta.proposed_effort = EFFORTS.includes(p.effort) ? p.effort : 'medium';
-    card.meta.proposed_order = String(p.order ?? 99);
-    card.meta.plan_note = String(p.note || '').replace(/\s+/g, ' ').slice(0, 140);
-    saveCard(card);
-    console.log(`${String(p.order).padStart(2)}. ${card.id.padEnd(9)} ${card.meta.proposed_model}/${card.meta.proposed_effort}  ${card.meta.plan_note}`);
-  }
 }
 
 // The panel's card editor: save <id> <text, encodeURIComponent> <hash of the text it opened, or "new">.
@@ -921,7 +881,7 @@ function cmdUpdate(board, args) {
 }
 
 // The panel's settings that belong to the board itself:
-// config maxParallel 3 | config plannerModel opus | config autoStart on|off | config autoInterval 5 (minutes)
+// config maxParallel 3 | config autoStart on|off | config autoInterval 5 (minutes)
 function cmdConfig(board, [key, value]) {
   const file = join(board.dir, 'board.json');
   const raw = JSON.parse(readFileSync(file, 'utf8'));
@@ -929,9 +889,6 @@ function cmdConfig(board, [key, value]) {
     const n = Number(value);
     if (!Number.isInteger(n) || n < 1 || n > 10) die('maxParallel must be a whole number from 1 to 10');
     raw.maxParallel = n;
-  } else if (key === 'plannerModel') {
-    if (!MODELS.includes(value)) die(`plannerModel must be one of ${MODELS.join(', ')}`);
-    raw.plannerModel = value;
   } else if (key === 'autoStart') {
     if (!['on', 'off'].includes(value)) die('autoStart must be on or off');
     raw.autoStart = { ...raw.autoStart, enabled: value === 'on' };
@@ -943,7 +900,7 @@ function cmdConfig(board, [key, value]) {
     if (!['on', 'off'].includes(value)) die(`${key} must be on or off`);
     const part = Object.keys(CLEAN_KEYS).find(k => CLEAN_KEYS[k] === key);
     raw.clean = { worktree: true, branch: true, archive: true, ...(raw.clean || {}), [part]: value === 'on' };
-  } else die('usage: config maxParallel <1-10> | plannerModel <haiku|sonnet|opus> | autoStart <on|off> | autoInterval <minutes> | cleanWorktree|cleanBranch|cleanArchive <on|off>');
+  } else die('usage: config maxParallel <1-10> | autoStart <on|off> | autoInterval <minutes> | cleanWorktree|cleanBranch|cleanArchive <on|off>');
   writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
   console.log(`${key} = ${['autoStart', 'autoInterval', ...Object.values(CLEAN_KEYS)].includes(key) ? value : raw[key]}`);
   if (key === 'maxParallel') startNext(loadBoard(board.dir), { quiet: true });   // more room: start what waits
@@ -1055,7 +1012,7 @@ const argv = process.argv.slice(2);
 const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD || join(HERE, '..', 'board'));
 const [cmd, ...rest] = argv;
 const commands = {
-  new: cmdNew, draft: cmdDraft, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
+  new: cmdNew, draft: cmdDraft, ls: cmdLs, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
   answer: cmdAnswer, press: cmdPress, clean: cmdClean, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
 };
 if (!cmd || !commands[cmd]) {
