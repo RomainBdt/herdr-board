@@ -219,13 +219,17 @@ function liveTerminals(board) {
 const LAST_MSG_CHARS = 300;
 function clip(text) {
   const t = String(text).replace(/\s+/g, ' ').trim();
-  return t.length > LAST_MSG_CHARS ? t.slice(0, LAST_MSG_CHARS - 1).trimEnd() + '…' : t;
+  if (t.length <= LAST_MSG_CHARS) return t;
+  // keep the END: that is where a question or an error sits. Don't start on half a surrogate pair.
+  let tail = t.slice(-(LAST_MSG_CHARS - 1));
+  if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+  return '…' + tail.trimStart();
 }
 function lastMessageFromTranscript(worktree) {
   const dir = join(homedir(), '.claude', 'projects', String(worktree).replace(/[^A-Za-z0-9]/g, '-'));
   let newest = null;
   for (const f of readdirSync(dir)) {
-    if (!f.endsWith('.jsonl')) continue;
+    if (!f.endsWith('.jsonl') || f.startsWith('agent-')) continue;
     const st = statSync(join(dir, f));
     if (!newest || st.mtimeMs > newest.mtime) newest = { path: join(dir, f), mtime: st.mtimeMs, size: st.size };
   }
@@ -245,7 +249,7 @@ function lastMessageFromTranscript(worktree) {
         const text = o.message.content.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
         if (text) return clip(text);
       }
-      if (n >= newest.size || len > 16 * 1024 * 1024) return '';
+      if (n >= newest.size || len >= 16 * 1024 * 1024) return '';
     }
   } finally { closeSync(fd); }
 }
@@ -254,7 +258,7 @@ function lastMessageOf(board, card) {
     if (card.meta.worktree && existsSync(card.meta.worktree)) { const m = lastMessageFromTranscript(card.meta.worktree); if (m) return m; }
   } catch { /* no transcript here (e.g. remote machine): try the terminal */ }
   const screen = hc(board, ['read', termName(card.id)], { json: false, allowFail: true }) || '';
-  const lines = screen.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^[─━═\s>│╭╰╮╯]*$/.test(l));
+  const lines = screen.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^[─━═\s>❯│╭╰╮╯]*$/.test(l) && !/\? for shortcuts|shift\+tab|esc to interrupt|auto mode|accept edits/i.test(l));
   return clip(lines.slice(-6).join(' '));
 }
 
@@ -269,7 +273,7 @@ function display(card, live, board) {
   if (t.status === 'error') return { column: 'needs-you', note: 'agent reported an error' };
   // just started or just answered: an agent reads as idle for a moment before its turn begins
   const fresh = Date.now() - Number(card.meta.active_ms || 0) < 90000;
-  if (!fresh && (t.status === 'done' || t.status === 'idle')) return { column: 'needs-you', note: 'agent stopped without asking or finishing', last: board ? lastMessageOf(board, card) : '' };
+  if (!fresh && (t.status === 'done' || t.status === 'idle')) return { column: 'needs-you', note: 'agent stopped without asking or finishing', last: lastMessageOf(board, card) };
   return { column: 'running', note: '' };
 }
 
