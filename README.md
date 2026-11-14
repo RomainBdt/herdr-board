@@ -64,12 +64,13 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | timer | `tick` | `next`, but only if `autoStart` is on and its interval has passed (the panel calls it every 30 s) |
 | you | `show <id>` / `update <id> --hash <h> --fields <enc>` | the card's form fields as JSON / change a card that has not started (what the panel's card form uses; refuses if the file changed since `show`) |
 | you | `answer <id> ["text"]` | send your answers to the live session |
+| you | `press <id> <key>...` | answer the prompt a blocked agent is showing (a permission prompt or a single-question AskUserQuestion) by pressing that option's number, then watch its screen for 8 s. Never sends the same answer twice: after a send that did not seem to land, it only looks again. The panel's option buttons and Retry run this |
 | you | `ls [--json]` | the board; `--json` is what the Herdr panel reads |
 | you | `clean <id>` | stop its agent and any terminal sitting in its worktree (when it has no uncommitted changes; busy folders are retried for a few seconds), then as the board's Clean settings say: remove its worktree, delete its branch, move the card to `archived` (all on by default; set with `config cleanWorktree`, `cleanBranch`, `cleanArchive` `on`/`off`) |
 | agent | `where` / `ask` / `done [--state s]` | update its own card; never edits the file directly. `--state` (`reached` default, `partial`, `blocked`, `failed`, `abandoned`) decides the tag shown on a Done card: the Finish-with state reached (None, Local commit, Local + review, Draft PR, PR ready, Merged), "Blocked", or "Not reached" |
 
 `ls` also checks each running agent: a terminal that is gone, blocked on a prompt, or stopped without `ask`/`done`
-shows under **needs-you** with the reason. For a stopped agent it also shows the agent's last message (~300 characters,
+shows under **needs-you** with the reason. For a blocked agent, `ls --json` adds a `prompt` (the question and options read from the session transcript, else the last lines of its screen with the numbered options parsed off it); the panel shows them as buttons, and a failed delivery shows on the card with **Retry**. Multi-question forms fall back to opening the session. Agents are told to use `ask`, not AskUserQuestion, so this is the safety net for permission prompts and stray questions. For a stopped agent it also shows the agent's last message (~300 characters,
 read from the end of its Claude session transcript, else from its terminal), to tell a forgotten question from an error.
 
 ## board.json

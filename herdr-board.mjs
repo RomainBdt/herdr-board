@@ -4,12 +4,12 @@
 // No packages: Node's standard library only.
 //
 //   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | plan | approve <id> [--model m] [--effort e] | unapprove <id> | next | start <id>
-//           show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
+//           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] "<summary>"
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync, rmdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync, rmdirSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -277,6 +277,120 @@ function display(card, live, board) {
   return { column: 'running', note: '' };
 }
 
+// ---------- Claude's own prompts (AskUserQuestion, permission) ----------
+
+const PRESS_WATCH_MS = 8000;
+
+function promptStateFile(board, id) { return join(board.dir, '.prompt-state', `${id}.json`); }
+function readPromptState(board, id) { try { return JSON.parse(readFileSync(promptStateFile(board, id), 'utf8')); } catch { return null; } }
+function clearPromptState(board, id) { try { unlinkSync(promptStateFile(board, id)); } catch {} }
+function writePromptState(board, id, st) {
+  mkdirSync(join(board.dir, '.prompt-state'), { recursive: true });
+  writeFileSync(promptStateFile(board, id), JSON.stringify(st));
+}
+
+// "❯ 1. Yes" / "  2. No, and tell Claude..." lines on a terminal screen -> [{key, label}]
+function screenOptions(screen) {
+  const out = [];
+  for (const line of String(screen || '').split('\n')) {
+    const m = line.match(/^\s*(?:[❯>›]\s*)?(\d{1,2})\.\s+(\S.*?)\s*$/);
+    if (m && m[1] === '1') out.length = 0;   // a new list starts: keep the last one (the dialog is at the bottom)
+    if (m && Number(m[1]) === out.length + 1) out.push({ key: m[1], label: m[2], description: '' });
+  }
+  return out;
+}
+
+// The last AskUserQuestion call in the session transcript that has no result yet, else null.
+// The transcript is ~/.claude/projects/<cwd, every non-alphanumeric char as ->/*.jsonl on the machine running the agent.
+function pendingAsk(cwd) {
+  try {
+    const dir = join(homedir(), '.claude', 'projects', String(cwd).replace(/[^A-Za-z0-9]/g, '-'));
+    const files = readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => ({ f, t: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
+    if (!files.length) return null;
+    const file = join(dir, files[0].f);
+    const size = statSync(file).size, len = Math.min(size, 400000);   // the tail only: ls is polled
+    const fd = openSync(file, 'r'), buf = Buffer.alloc(len);
+    try { readSync(fd, buf, 0, len, size - len); } finally { closeSync(fd); }
+    const open = new Map();   // tool_use id -> input
+    for (const line of buf.toString('utf8').split('\n')) {
+      if (!line.includes('AskUserQuestion') && !line.includes('tool_result')) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      for (const part of Array.isArray(o.message?.content) ? o.message.content : []) {
+        if (part.type === 'tool_use' && part.name === 'AskUserQuestion') open.set(part.id, part.input);
+        else if (part.type === 'tool_result') open.delete(part.tool_use_id);
+      }
+    }
+    const last = [...open.values()].pop();
+    return Array.isArray(last?.questions) && last.questions.length ? last.questions : null;
+  } catch { return null; }
+}
+
+// What a blocked card is waiting on: {kind, text, options:[{key,label,description}], multi, screen, failed}.
+// options is empty when the panel can't answer it (a multi-question form): the person opens the session.
+function promptOf(board, card) {
+  const name = termName(card.id);
+  const screen = (hc(board, ['read', name], { json: false, allowFail: true }) || '').split('\n').map(l => l.trimEnd()).filter(l => l.trim());
+  const body = screen.filter(l => /[A-Za-z0-9]/.test(l) && !/^[─╌]/.test(l));   // drop the ──── and ╌╌╌╌ rules
+  const tail = body.slice(-9).join('\n');
+  const onScreen = screenOptions(tail);
+  let p = { kind: 'screen', text: tail, options: onScreen, multi: false };
+  let qs = pendingAsk(card.meta.worktree);
+  // a question left unanswered by an old, interrupted run is not what is on screen now
+  if (qs && !body.join('\n').includes(String(qs[0].question || '').slice(0, 30))) qs = null;
+  if (qs) {
+    const q = qs[0];
+    const single = qs.length === 1 && !q.multiSelect && onScreen.length >= (q.options || []).length && (q.options || []).length > 0;
+    p = {
+      kind: 'ask', text: qs.map(x => x.question).join('\n'), multi: qs.length > 1 || Boolean(q.multiSelect),
+      options: single ? q.options.map((o, i) => ({ key: String(i + 1), label: o.label, description: o.description || '' })) : [],
+    };
+  }
+  const st = readPromptState(board, card.id);
+  const sig = p.options.map(o => o.label).join('|') + '#' + (p.kind === 'ask' ? p.text.slice(0, 80) : (p.text.split('\n').find(l => /\?\s*$/.test(l)) || '').trim());
+  p.sig = sig;
+  if (st && st.sent && !st.done && st.sig === sig) p.failed = { choice: st.choice, sent: st.sent };   // answered, yet the dialog is still up
+  return p;
+}
+
+function cmdPress(board, [id, ...keys]) {
+  if (!id || !keys.length) die('usage: press <id> <key>...');
+  const card = loadCard(board, id);
+  const name = termName(id);
+  const live = liveTerminals(board);
+  if (!live[name] || live[name].status !== 'blocked') die(`${id}: no prompt is waiting`);
+  const p = promptOf(board, card);
+  const choice = keys.join(' ');
+  const st = readPromptState(board, id);
+  const same = st && !st.done && st.sig === p.sig;
+  const watch = () => {
+    for (let t = 0; t < PRESS_WATCH_MS; t += 500) {
+      sleepMs(500);
+      const l = liveTerminals(board)[name];
+      if (!l || l.status !== 'blocked') return true;
+      const sc = hc(board, ['read', name], { json: false, allowFail: true }) || '';
+      if (!screenOptions(sc.split('\n').filter(x => x.trim()).slice(-15).join('\n')).length) return true;
+    }
+    return false;
+  };
+  if (same && st.sent) {
+    // never send twice: Retry only looks again
+    if (watch()) { writePromptState(board, id, { ...st, done: true }); console.log(`${id}: delivered`); return; }
+    die(`${id}: ${st.choice} was sent but the prompt is still showing; not sent again. Open the session`);
+  }
+  writePromptState(board, id, { sig: p.sig, choice, sent: false, at: Date.now() });
+  const r = spawnSync('hc', ['keys', name, ...keys], { env: hcEnv(board), encoding: 'utf8' });
+  if (r.status !== 0) die(`could not send the keys: ${(r.stderr || r.stdout || '').trim()}`);   // not sent: Retry may send
+  writePromptState(board, id, { sig: p.sig, choice, sent: true, at: Date.now() });
+  // a number only moves the highlight in some dialogs: press Enter once if the cursor sits on our choice
+  sleepMs(700);
+  const sc = hc(board, ['read', name], { json: false, allowFail: true }) || '';
+  // only while the same prompt is still up: otherwise Enter would accept the default of the NEXT prompt, unseen
+  const sameScreen = sc.includes((p.text.split('\n')[0] || '').trim());
+  if (sameScreen && keys.length === 1 && /^\d+$/.test(keys[0]) && new RegExp(`^\\s*[❯>›]\\s*${keys[0]}\\.`, 'm').test(sc)) hc(board, ['keys', name, 'enter'], { json: false, allowFail: true });
+  if (watch()) { writePromptState(board, id, { sig: p.sig, choice, sent: true, done: true, at: Date.now() }); console.log(`${id}: delivered`); return; }
+  die(`${id}: sent ${choice} but the prompt is still showing. Retry checks again without sending twice`);
+}
+
 // ---------- commands ----------
 
 // Fills the template from the panel's form. Empty fields keep the template's defaults.
@@ -361,6 +475,7 @@ function cmdLs(board, args) {
   const cards = allCards(board).map(c => {
     const d = display(c, live, board);
     const repo = board.repos[c.meta.repo] || {};
+    if (!d.note.startsWith('waiting on a prompt') && live[termName(c.id)]?.status !== 'blocked') clearPromptState(board, c.id);   // that prompt is gone: its "already sent" must not block the next one
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
@@ -370,6 +485,7 @@ function cmdLs(board, args) {
         ? { model: c.meta.proposed_model, effort: c.meta.proposed_effort, order: Number(c.meta.proposed_order) || 99, note: c.meta.plan_note || '' }
         : null,
       where: whereOf(c), questions: questionsOf(c),
+      prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
       terminal: live[termName(c.id)] ? termName(c.id) : '',
       address: live[termName(c.id)]?.address || '',
       agent: live[termName(c.id)]?.status || '',
@@ -940,7 +1056,7 @@ const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD ||
 const [cmd, ...rest] = argv;
 const commands = {
   new: cmdNew, draft: cmdDraft, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
-  answer: cmdAnswer, clean: cmdClean, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+  answer: cmdAnswer, press: cmdPress, clean: cmdClean, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
 };
 if (!cmd || !commands[cmd]) {
   console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
