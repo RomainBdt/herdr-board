@@ -636,8 +636,12 @@ function cmdClean(board, [id]) {
         // not merged into the checked-out branch (a PR merged on GitHub leaves local main behind): still safe when a remote has it
         let remote = '';
         try { remote = git(['-C', repo.path, 'branch', '-r', '--contains', branch]); } catch { /* none */ }
-        if (remote) { git(['-C', repo.path, 'branch', '-D', branch]); did.push(`branch ${branch} deleted`); }
-        else note = `branch ${branch} kept: it has commits that are neither merged nor on a remote (git branch -D ${branch} to force)`;
+        if (!remote) note = `branch ${branch} kept: it has commits that are neither merged nor on a remote (git branch -D ${branch} to force)`;
+        else {
+          try { git(['-C', repo.path, 'branch', '-D', branch]); did.push(`branch ${branch} deleted`); }
+          // e.g. still checked out in a worktree that was kept (cleanWorktree off): never lose the archive step over it
+          catch (e2) { note = `branch ${branch} kept: ${String(e2.stderr || e2.message).trim().split('\n')[0]}`; }
+        }
       }
     }
   }
