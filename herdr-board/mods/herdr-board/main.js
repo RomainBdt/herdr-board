@@ -581,6 +581,11 @@ export default class HerdrBoard extends View {
       autoStart: known?.autoStart ?? null, clean: known?.clean ?? null, name: known?.name ?? "" };
     row.script = InputState.new({ value: c.script });
     row.boardDir = InputState.new({ value: c.board });
+    // Agents at once: any whole number, typed (Enter or leaving the field) or stepped with - / +
+    row.par = InputState.new({ value: row.maxParallel == null ? "" : String(row.maxParallel) });
+    const commitPar = (_e, cx) => this.setPar(cx, row, Number(row.par.value().trim()));
+    row.par.on("submit", commitPar);
+    row.par.on("blur", commitPar);
     // the paths apply like every other setting: shortly after typing stops, and on closing
     const later = (_e, cx) => { this.pending?.cancel(); this.pending = cx.timer.after(800, (cx) => this.saveRows(cx)); };
     row.script.on("change", later);
@@ -598,14 +603,15 @@ export default class HerdrBoard extends View {
   loadRow(cx, row) {
     const conn = this.rowConn(row);
     row.loaded = connKey(conn);
-    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); return; }
+    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); row.par.set_value(""); return; }
     cx.spawn(async (cx) => {
       const r = await cli(conn, ["ls", "--json"]);
       if (connKey(this.rowConn(row)) !== connKey(conn)) return;   // changed meanwhile
       try {
         const d = JSON.parse(r.out);
         Object.assign(row, { maxParallel: d.maxParallel, autoStart: d.autoStart, clean: d.clean ?? null, name: d.board });
-      } catch { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); }
+        row.par.set_value(d.maxParallel == null ? "" : String(d.maxParallel));
+      } catch { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); row.par.set_value(""); }
       cx.notify();
     });
   }
@@ -645,12 +651,24 @@ export default class HerdrBoard extends View {
     if (shown) run("layout.show", { id: SLOT_ID[pos] });
   }
 
-  serverSetting(cx, row, key, value) {
+  setPar(cx, row, n) {
+    if (!Number.isSafeInteger(n) || n < 1) n = row.maxParallel;   // not a number: back to what is saved
+    if (n == null) return;
+    row.par.set_value(String(n));
+    if (n === row.maxParallel) return;
+    // taken at once, so a blur right after Enter, or a -/+ click right after typing, build on this value (not the old one)
+    const prev = row.maxParallel;
+    row.maxParallel = n;
+    this.serverSetting(cx, row, "maxParallel", n, prev);
+  }
+
+  serverSetting(cx, row, key, value, prev) {
     this.msg = "Saving…";
     cx.notify();
     cx.spawn(async (cx) => {
       const r = await cli(this.rowConn(row), ["config", key, String(value)]);
       // an older herdr-board.mjs does not know the newer settings and answers with its usage line
+      if (!r.ok && key === "maxParallel") { row.maxParallel = prev; row.par.set_value(prev == null ? "" : String(prev)); }   // not saved: show what is saved
       this.msg = r.ok ? "" : /usage: config/.test(r.err) ? `Out of date: this board's herdr-board.mjs cannot save "${key}". Run ./deploy.sh again.` : r.err;
       if (r.ok) {
         if (key === "autoStart") row.autoStart = { ...row.autoStart, enabled: value === "on" };
@@ -697,7 +715,14 @@ export default class HerdrBoard extends View {
       .child(row("Board CLI", "herdr-board.mjs on that machine", field(r.script)))
       .child(row("Board folder", "Holds board.json and cards/", field(r.boardDir)))
       .child(row("Agents at once", "Saved in its board.json",
-        seg(`par-${r.n}`, [1, 2, 3, 4, 5, 6].map((n) => [n, String(n)]), r.maxParallel, (v, cx) => this.serverSetting(cx, r, "maxParallel", v))))
+        (() => {
+          const btn = (id, label, d) => h_flex().id(`${id}-${r.n}`).w(26).h(26).items_center().justify_center().rounded(7).cursor_pointer().text_size(14)
+            .border_1().border_color(t.border).bg(t.raised).text_color(t.foreground)
+            .on_click((_e, cx) => { if (r.maxParallel != null) this.setPar(cx, r, Math.max(1, r.maxParallel + d)); cx.notify(); }).child(label);
+          return h_flex().gap(4).items_center().child(btn("par-dec", "−", -1))
+            .child(Input.new(r.par).w(56).h(26).px(8).rounded(7).border_1().border_color(t.input).bg(t.background).text_size(12))
+            .child(btn("par-inc", "+", 1));
+        })()))
       .child(row("Auto-start", "Start approved cards by itself while slots are free (needs this panel open)",
         seg(`as-${r.n}`, [["on", "On"], ["off", "Off"]], r.autoStart ? (r.autoStart.enabled ? "on" : "off") : null,
           (v, cx) => this.serverSetting(cx, r, "autoStart", v))))
