@@ -10,6 +10,9 @@ import { exec, run, props, theme, settings, notify, playSound, openOverlay, clos
 const COLUMNS = [
   ["todo", "To do"], ["ready", "Ready"], ["running", "Running"], ["needs-you", "Needs you"], ["done", "Done"],
 ];
+// the board's "done:" targets and their labels (the New card chips and the Done tag both use them)
+const FINISH_WITH = [["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]];
+const REACHED = Object.fromEntries(FINISH_WITH);
 const BUMP = "herdr-board.bump";     // dialogs set it after a change so the board refreshes at once
 
 // same as textHash in herdr-board.mjs: the editor sends it back so a card an agent changed isn't overwritten
@@ -374,9 +377,12 @@ export default class HerdrBoard extends View {
       c.questions.forEach((q, i) => rows.push(line("?", `${i + 1}. ${q}`, t.blocked)));
     }
     const live = c.agent === "working";
-    const OUT = { reached: ["✓ reached", t.working], partial: ["◐ partial", t.accent], blocked: ["⛔ blocked", t.blocked],
-      failed: ["✗ failed", t.blocked], abandoned: ["– abandoned", t.dim] };
-    const tag = c.column === "done" ? OUT[c.outcome || "reached"] : null;
+    // Done tag: the Finish-with state reached; "Not reached" when the target was missed; "Blocked" when it cannot continue.
+    const out = c.outcome || "reached";
+    const tag = c.column !== "done" ? null
+      : out === "reached" ? ["✓ " + (REACHED[c.done] || "Done"), t.working]
+      : out === "blocked" ? ["⛔ Blocked", t.blocked]
+      : ["✗ Not reached" + (REACHED[c.done] ? `: ${REACHED[c.done]}` : ""), out === "abandoned" ? t.dim : t.blocked];
     return h_flex().id(`card-${c.uid}`).w_full().rounded(8).overflow_hidden().flex_shrink_0()
       .bg(t.background).border_1().border_color(c.column === "needs-you" ? t.blocked : t.border)
       .cursor_pointer().hover((s) => s.border_color(t.input))
@@ -389,7 +395,7 @@ export default class HerdrBoard extends View {
           .child(div().min_w(0).flex_1().truncate().text_size(12.5).font_medium().text_color(t.foreground).child(c.title))
           .when(c.multi, (el) => el.child(div().flex_shrink_0().max_w(110).truncate().px(5).rounded(4).bg(t.raised)
             .text_size(10.5).text_color(t.muted).child(c.boardLabel)))
-          .when(Boolean(tag), (el) => el.child(div().flex_shrink_0().px(5).rounded(4).bg(t.raised)
+          .when(Boolean(tag), (el) => el.child(div().min_w(0).max_w(150).truncate().px(5).rounded(4).bg(t.raised)
             .text_size(10.5).font_medium().text_color(tag[1]).child(tag[0])))
           .when(live, (el) => el.child(div().flex_shrink_0().text_size(11).text_color(t.working)
             .frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90))))
@@ -923,7 +929,7 @@ export default class HerdrBoard extends View {
         .child(label("Done looks like", "What you will check to call it done"))
         .child(area(this.doneLooks, 70))
         .child(label("Finish with", "How far the agent takes it"))
-        .child(chip("done", [["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]],
+        .child(chip("done", FINISH_WITH,
           this.done, (v) => { this.done = v; }))
         .child(label("Model", "Auto: the planner proposes"))
         .child(chip("model", [["", "Auto"], ["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], this.model, (v) => { this.model = v; }))
