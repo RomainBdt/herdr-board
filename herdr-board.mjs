@@ -979,7 +979,7 @@ function cmdConfig(board, [key, value]) {
   const raw = JSON.parse(readFileSync(file, 'utf8'));
   if (key === 'maxParallel') {
     const n = Number(value);
-    if (!Number.isInteger(n) || n < 1 || n > 10) die('maxParallel must be a whole number from 1 to 10');
+    if (!Number.isSafeInteger(n) || n < 1) die('maxParallel must be a whole number, 1 or more');
     raw.maxParallel = n;
   } else if (key === 'autoStart') {
     if (!['on', 'off'].includes(value)) die('autoStart must be on or off');
@@ -992,7 +992,7 @@ function cmdConfig(board, [key, value]) {
     if (!['on', 'off'].includes(value)) die(`${key} must be on or off`);
     const part = Object.keys(CLEAN_KEYS).find(k => CLEAN_KEYS[k] === key);
     raw.clean = { worktree: true, branch: true, archive: true, ...(raw.clean || {}), [part]: value === 'on' };
-  } else die('usage: config maxParallel <1-10> | autoStart <on|off> | autoInterval <minutes> | cleanWorktree|cleanBranch|cleanArchive <on|off>');
+  } else die('usage: config maxParallel <number> | autoStart <on|off> | autoInterval <minutes> | cleanWorktree|cleanBranch|cleanArchive <on|off>');
   writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
   console.log(`${key} = ${['autoStart', 'autoInterval', ...Object.values(CLEAN_KEYS)].includes(key) ? value : raw[key]}`);
   if (key === 'maxParallel') startNext(loadBoard(board.dir), { quiet: true });   // more room: start what waits
