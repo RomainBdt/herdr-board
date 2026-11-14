@@ -506,10 +506,26 @@ function reopenDone(board, live) {
   }
 }
 
+// Archived cards: newest close date first (the card's `updated`, which Clean sets), then by done_ms.
+// Cards with no `updated` come after the dated ones. Other cards keep their place (stable, in place).
+function sortArchived(cards) {
+  const key = c => [c.meta.updated || '', Number(c.meta.done_ms) || 0];
+  const slots = [], archived = [];
+  cards.forEach((c, i) => { if (c.meta.status === 'archived') { slots.push(i); archived.push(c); } });
+  archived.sort((a, b) => {
+    const [ua, da] = key(a), [ub, db] = key(b);
+    if (!ua !== !ub) return ua ? -1 : 1;
+    return ua !== ub ? (ua < ub ? 1 : -1) : db - da;
+  });
+  slots.forEach((i, n) => { cards[i] = archived[n]; });
+}
+
 function cmdLs(board, args) {
   const live = liveTerminals(board);
   reopenDone(board, live);
-  const cards = allCards(board).map(c => {
+  const all = allCards(board);
+  sortArchived(all);
+  const cards = all.map(c => {
     const d = display(c, live, board);
     const repo = board.repos[c.meta.repo] || {};
     if (!d.note.startsWith('waiting on a prompt') && live[termName(c.id)]?.status !== 'blocked') clearPromptState(board, c.id);   // that prompt is gone: its "already sent" must not block the next one

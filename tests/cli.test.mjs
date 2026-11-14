@@ -184,3 +184,16 @@ describe('where and ask (the agent\'s other commands)', () => {
     assert.doesNotMatch(section(c, 'Answers').body, /Use A/);
   });
 });
+
+describe('ls: archived order', () => {
+  test('archived cards: newest close date first, undated last; other columns untouched', () => {
+    const mk = (id, extra) => b.write(id, cardText({ id, title: id, repo: 'app', status: 'archived', ...extra }));
+    mk('TST-1', { updated: '2026-11-10 09:00' });
+    mk('TST-2', { done_ms: '5' });
+    mk('TST-3', { updated: '2026-11-12 09:00' });
+    mk('TST-4', { done_ms: '9' });
+    b.write('TST-5', cardText({ id: 'TST-5', title: 'x', repo: 'app', status: 'todo' }));
+    const j = JSON.parse(b.run('ls', '--json').out);
+    assert.deepEqual(j.cards.filter(c => c.column === 'archived').map(c => c.id), ['TST-3', 'TST-1', 'TST-4', 'TST-2']);
+  });
+});
