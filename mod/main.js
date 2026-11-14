@@ -845,7 +845,6 @@ export default class HerdrBoard extends View {
     this.done = "pr-ready";
     this.model = "";          // "" = let the planner propose
     this.effort = "";
-    this.approved = false;
     this.creating = false;
     this.created = "";        // id of a card already made by this form (see create)
     // Plain text areas (same font as the Title field); Tab walks Title -> Context -> Constraints -> Done looks like.
@@ -891,7 +890,7 @@ export default class HerdrBoard extends View {
     };
     if (this.errs.repo || this.errs.title) { this.msg = ""; cx.notify(); return; }
     const fields = encodeURIComponent(JSON.stringify({
-      done: this.done, model: this.model, effort: this.effort, approved: this.approved || startNow,
+      done: this.done, model: this.model, effort: this.effort, approved: startNow,
       context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
     }));
     if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it, or edit the card afterwards."; cx.notify(); return; }
@@ -999,14 +998,12 @@ export default class HerdrBoard extends View {
         .child(label("Model", "Auto: the planner proposes"))
         .child(chip("model", [["", "Auto"], ["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], this.model, (v) => { this.model = v; }))
         .child(label("Effort", "Auto: the planner proposes"))
-        .child(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; }))
-        .child(label("Start", "Without approval the card waits for you in To do"))
-        .child(chip("appr", [[false, "Wait for my approval"], [true, "Start as soon as a slot is free"]], this.approved, (v) => { this.approved = v; })))
+        .child(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; })))
       .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
         .child(button("n-cancel", "Cancel", () => closeOverlay(p.overlay)))
         .child(button("n-help", "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields" }))
         .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true }))
-        .child(button("n-start", "Create and start", (cx) => this.create(cx, true), { primary: true, tip: "Create the card and start its agent right away" })));
+        .child(button("n-start", "Create and start", (cx) => this.create(cx, true), { primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" })));
   }
 }
