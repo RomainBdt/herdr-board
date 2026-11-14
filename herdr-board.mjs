@@ -1104,8 +1104,9 @@ function cmdClean(board, args) {
 
 // ---------- main ----------
 
-// The tests import this file for its functions; HERDR_BOARD_NO_MAIN=1 keeps the command line below from running.
-export { parseCard, renderCard, section, setSection, applyFields, nextActionOf, display, whereOf, questionsOf, answersOf, termName, autoInterval, clip, STATUSES, OUTCOMES };
+// The tests import this file for its functions. Node 24.2+ tells whether this file was started directly
+// (import.meta.main); on older Node, HERDR_BOARD_NO_MAIN=1 keeps the command line below from running.
+export { parseCard, renderCard, section, applyFields, nextActionOf, display, whereOf, questionsOf, answersOf, termName, autoInterval, clip };
 
 function main() {
   const argv = process.argv.slice(2);
@@ -1126,4 +1127,4 @@ function main() {
     process.exit(1);
   }
 }
-if (process.env.HERDR_BOARD_NO_MAIN !== '1') main();
+if (typeof import.meta.main === 'boolean' ? import.meta.main : process.env.HERDR_BOARD_NO_MAIN !== '1') main();

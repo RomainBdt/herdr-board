@@ -287,7 +287,7 @@ node tests/run.mjs
 ```
 
 (`node --test` also works on Node 21+.) The tests use a throwaway board in the system temp folder and hide `hc`
-from the CLI they run, so they never touch your real board or start an agent. `tests/unit.test.mjs` covers the card
+and `claude` from the CLI they run, so they never touch your real board or start an agent. `tests/unit.test.mjs` covers the card
 logic (parsing, template fields, next action, board column); `tests/cli.test.mjs` runs `new`, `done`, `where` and `ask`.
 
 ## Licenses and notices

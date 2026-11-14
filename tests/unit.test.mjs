@@ -2,11 +2,12 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { ROOT } from './helpers.mjs';
+import { join } from 'node:path';
+import { ROOT, NO_PATH } from './helpers.mjs';
 
-process.env.HERDR_BOARD_NO_MAIN = '1';          // import the functions without running the command line
-process.env.PATH = dirname(process.execPath);   // no `hc` here: display() may look for a terminal, it must find none
+process.env.HERDR_BOARD_NO_MAIN = '1';   // import the functions without running the command line
+process.env.PATH = NO_PATH;              // no `hc` here: display() may look for a terminal, it must find none
+delete process.env.HC_SESSION;
 const hb = await import('../herdr-board.mjs');
 const TEMPLATE = readFileSync(join(ROOT, 'card-template.md'), 'utf8');
 
