@@ -12,6 +12,7 @@ herdr-board/                 this code, copied by ./deploy.sh
   herdr-board.mjs            the CLI (Node, no packages)
   rules.md                   what every card agent is told (autonomy, questions, done targets)
   card-template.md           a new card
+  draft-rules.md             what the "Create with agent" chat is told
 ```
 
 ## Flow
@@ -30,6 +31,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | Who | Command | |
 |---|---|---|
 | you | `new <repo> "<title>"` | new card from the template |
+| you | `draft <repo> ["<title>"]` | the "Create with agent" button: a chat agent asks what is missing, then makes the card with `new --fields-file` (never auto-approved) |
 | you | `plan` | a one-shot Claude proposes model/effort/order for waiting cards |
 | you | `approve <id> [--model m] [--effort e]` | ready to start (takes the proposal by default) |
 | you | `next` / `start <id>` | start queued cards up to `maxParallel` / start one now |

@@ -823,6 +823,28 @@ export default class HerdrBoard extends View {
     });
   }
 
+  // "Create with agent": a chat agent asks what is missing and writes the card. The form's text goes with it.
+  help(cx) {
+    const p = props();
+    if (this.creating) return;
+    if (!this.pick) { this.msg = "Pick a repo first."; cx.notify(); return; }
+    const fields = encodeURIComponent(JSON.stringify({
+      done: this.done, model: this.model, effort: this.effort,
+      context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
+    }));
+    if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it first."; cx.notify(); return; }
+    this.creating = true;
+    this.msg = "Starting the agent…";
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const c = p.boards[this.pick.b].conn;
+      const r = await cli(c, ["draft", this.pick.repo, this.title.trim(), "--fields", fields], 90000);
+      if (!r.ok) { this.creating = false; this.msg = r.err; cx.notify(); return; }
+      closeOverlay(p.overlay);
+      try { run("agent.focus", { terminal: c.machine ? `${c.machine}/${r.out}` : r.out }); } catch { /* the agent is in Herdr anyway */ }
+    });
+  }
+
   renderNew(cx) {
     const t = theme();
     const p = props();
@@ -878,6 +900,7 @@ export default class HerdrBoard extends View {
       .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
         .child(button("n-cancel", "Cancel", () => closeOverlay(p.overlay)))
+        .child(button("n-help", "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields" }))
         .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true })));
   }
 }
