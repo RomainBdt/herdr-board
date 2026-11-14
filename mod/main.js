@@ -113,18 +113,28 @@ export default class HerdrBoard extends View {
       this.bump = shared(BUMP);
       for (const c of list) {
         const src = this.srcs[connKey(c)];
-        if (!src || bumped || Date.now() - src.last >= S().refresh * 1000) this.refreshOne(cx, c);
+        // a read still running is not re-queued by the interval (a slow ssh board would be read back to back);
+        // only a bump (an action finished) asks for another one after it
+        if (!src || bumped || (!src.loading && Date.now() - src.last >= S().refresh * 1000)) this.refreshOne(cx, c);
       }
     });
     // Auto-start: every 30 s ask each board to `tick`. The board decides (its autoStart setting and interval,
     // read fresh each time), so only the active copy ticks and a settings change needs no restart.
     cx.timer.every(30000, (cx) => {
       if (!this.active()) return;
-      for (const c of conns()) cx.spawn(async (cx) => {
-        const r = await cli(c, ["tick"], 180000);
-        if (r.ok && /started:/.test(r.out)) this.refreshOne(cx, c);
-        else if (!r.ok) notify({ title: "Auto-start failed", body: r.err.slice(0, 300), level: "error" });
-      });
+      for (const c of conns()) {
+        const src = this.srcs[connKey(c)];
+        if (!src?.data?.autoStart?.enabled || src.ticking) continue;   // off (or CLI too old to say): no process, no ssh
+        src.ticking = true;
+        cx.spawn(async (cx) => {
+          const r = await cli(c, ["tick"], 180000);
+          src.ticking = false;
+          const failed = !r.ok ? r.err : /auto-start failed/.test(r.out) ? r.out : "";   // the CLI reports a failed run on stdout
+          if (failed && !src.tickFailed) notify({ title: `Auto-start failed${this.boards().length > 1 ? ` on ${machineName(c)}` : ""}`, body: failed.slice(0, 300), level: "error" });
+          src.tickFailed = Boolean(failed);   // once per failing stretch, not every 30 s
+          if (r.ok && /started:/.test(r.out)) this.refreshOne(cx, c);
+        });
+      }
     });
     // keys.json can bind these: "herdr-board.answer" opens the first card that needs you,
     // "herdr-board.jump" opens its live session.

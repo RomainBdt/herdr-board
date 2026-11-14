@@ -568,7 +568,7 @@ function cmdConfig(board, [key, value]) {
     raw.autoStart = { ...raw.autoStart, intervalMinutes: n };
   } else die('usage: config maxParallel <1-10> | plannerModel <haiku|sonnet|opus> | autoStart <on|off> | autoInterval <minutes>');
   writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
-  console.log(`${key} = ${key === 'autoStart' ? value : key === 'autoInterval' ? value : raw[key]}`);
+  console.log(`${key} = ${key === 'autoStart' || key === 'autoInterval' ? value : raw[key]}`);
   if (key === 'maxParallel') startNext(loadBoard(board.dir), { quiet: true });   // more room: start what waits
 }
 
