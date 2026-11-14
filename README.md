@@ -33,6 +33,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | you | `plan` | a one-shot Claude proposes model/effort/order for waiting cards |
 | you | `approve <id> [--model m] [--effort e]` | ready to start (takes the proposal by default) |
 | you | `next` / `start <id>` | start queued cards up to `maxParallel` / start one now |
+| timer | `tick` | `next`, but only if `autoStart` is on and its interval has passed (the panel calls it every 30 s) |
 | you | `answer <id> ["text"]` | send your answers to the live session |
 | you | `ls [--json]` | the board; `--json` is what the Herdr panel reads |
 | you | `clean <id>` | stop its agent, remove its worktree (keeps the branch) |
@@ -51,12 +52,21 @@ shows under **needs-you** with the reason.
   "maxParallel": 3,
   "permissionMode": "auto",
   "plannerModel": "sonnet",
+  "autoStart": { "enabled": false, "intervalMinutes": 5 },
   "worktrees": "D:/work/worktrees",
   "repos": {
     "billing-api": { "path": "D:/work/billing-api", "prefix": "API", "base": "main", "color": "#3b82f6" }
   }
 }
 ```
+
+`autoStart` (default off): when `enabled`, approved cards start by themselves while slots are free, checked every
+`intervalMinutes` (1 to 1440, default 5). It is the same logic as `next`: an empty queue or no free slot does nothing,
+and a card that fails to start gets `start_error` as usual while the timer goes on. The timer is the panel (its copy in
+the chosen slot calls `tick` on every board each 30 s), so the board's Herdr must be open; `tick` can also be run from
+cron. board.json is re-read on every `tick`: changing the switch or interval, in the panel or by hand, needs no
+restart. Change them with `config autoStart on|off` and `config autoInterval <minutes>`. The time of the last run is
+kept in `<board>/.auto-start`. There is no quiet-hours or machine-busy condition: the agent limit is the throttle.
 
 ## Notes (Windows server)
 
@@ -119,6 +129,7 @@ it from the keyboard (not Ctrl+B: Claude Code uses it).
 | Show Done | |
 | Refresh every | 5 s, 15 s, 1 min |
 | Alerts | toast + sound when a card needs you; when one is done (off by default: Herdr already tells you) |
+| Auto-start / Auto-start every | per board, saved in its `board.json`: on or off, and 1, 5, 10, 15, 30 or 60 minutes |
 | Boards | one or more: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once and Planner model (saved in that board's `board.json` with `herdr-board config ...`) |
 
 Display and connection settings are kept in Herdr's shared state (`herdr-board.settings`).

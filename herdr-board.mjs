@@ -4,7 +4,7 @@
 // No packages: Node's standard library only.
 //
 //   you:    new <repo> "<title>" | plan | approve <id> [--model m] [--effort e] | next | start <id>
-//           answer <id> ["<text>"] | ls [--json] | clean <id>
+//           answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> "<summary>"
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
@@ -45,6 +45,9 @@ function writeAtomic(path, text) {
 
 // ---------- board ----------
 
+// board.json "autoStart": {"enabled": false, "intervalMinutes": 5}; anything unusable falls back to 5.
+function autoInterval(v) { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 1440 ? n : 5; }
+
 function loadBoard(dir) {
   const file = join(dir, 'board.json');
   if (!existsSync(file)) die(`no board.json in ${dir} (use --board <dir> or HERDR_BOARD)`);
@@ -53,6 +56,7 @@ function loadBoard(dir) {
   b.cardsDir = join(dir, 'cards');
   b.maxParallel ??= 2;
   b.repos ??= {};
+  b.autoStart = { enabled: b.autoStart?.enabled === true, intervalMinutes: autoInterval(b.autoStart?.intervalMinutes) };
   if (!b.worktrees) die('board.json needs "worktrees": the folder where card worktrees go');
   return b;
 }
@@ -256,7 +260,7 @@ function cmdLs(board, args) {
   const running = cards.filter(c => c.column === 'running').length;   // same rule as the queue's free slots
   if (args.includes('--json')) {
     const repos = Object.fromEntries(Object.entries(board.repos).map(([k, r]) => [k, r.color || '#888888']));
-    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, plannerModel: board.plannerModel || 'sonnet', running, repos, cards }, null, 2));
+    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, plannerModel: board.plannerModel || 'sonnet', autoStart: board.autoStart, running, repos, cards }, null, 2));
     return;
   }
   console.log(`${board.name || 'board'}: ${running}/${board.maxParallel} running`);
@@ -391,6 +395,21 @@ function startNext(board, { quiet = false } = {}) {
     }
   }
   if (!quiet || started.length) console.log(started.length ? `started: ${started.join(', ')}` : `nothing to start (${running}/${board.maxParallel} running)`);
+}
+
+// The timer's one step (the panel calls it every 30 s; cron or a loop can too). Does nothing unless autoStart is
+// on and a full interval has passed since the last run; then it is exactly `next`. board.json is read on every call,
+// so changing the switch or the interval needs no restart. The last run is kept in <board>/.auto-start.
+function cmdTick(board) {
+  if (!board.autoStart.enabled) return;
+  const file = join(board.dir, '.auto-start');
+  let last = 0;
+  try { last = Number(readFileSync(file, 'utf8')) || 0; } catch {}
+  if (last > Date.now()) last = 0;   // clock moved back
+  if (Date.now() - last < board.autoStart.intervalMinutes * 60000) return;
+  writeAtomic(file, String(Date.now()));   // first: a failure below must not make it retry every 30 s
+  try { startNext(board, { quiet: true }); }
+  catch (e) { console.log(`auto-start failed: ${e.message}`); }   // the timer goes on
 }
 
 function git(args, opts = {}) {
@@ -528,7 +547,8 @@ function cmdSave(board, [id, encoded, expected]) {
   console.log(`${id.toUpperCase()}: saved`);
 }
 
-// The panel's settings that belong to the board itself: config maxParallel 3 | config plannerModel opus
+// The panel's settings that belong to the board itself:
+// config maxParallel 3 | config plannerModel opus | config autoStart on|off | config autoInterval 5 (minutes)
 function cmdConfig(board, [key, value]) {
   const file = join(board.dir, 'board.json');
   const raw = JSON.parse(readFileSync(file, 'utf8'));
@@ -539,9 +559,16 @@ function cmdConfig(board, [key, value]) {
   } else if (key === 'plannerModel') {
     if (!MODELS.includes(value)) die(`plannerModel must be one of ${MODELS.join(', ')}`);
     raw.plannerModel = value;
-  } else die('usage: config maxParallel <1-10> | config plannerModel <haiku|sonnet|opus>');
+  } else if (key === 'autoStart') {
+    if (!['on', 'off'].includes(value)) die('autoStart must be on or off');
+    raw.autoStart = { ...raw.autoStart, enabled: value === 'on' };
+  } else if (key === 'autoInterval') {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > 1440) die('autoInterval must be a whole number of minutes, 1 to 1440');
+    raw.autoStart = { ...raw.autoStart, intervalMinutes: n };
+  } else die('usage: config maxParallel <1-10> | plannerModel <haiku|sonnet|opus> | autoStart <on|off> | autoInterval <minutes>');
   writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
-  console.log(`${key} = ${raw[key]}`);
+  console.log(`${key} = ${key === 'autoStart' || key === 'autoInterval' ? value : raw[key]}`);
   if (key === 'maxParallel') startNext(loadBoard(board.dir), { quiet: true });   // more room: start what waits
 }
 
@@ -566,7 +593,7 @@ const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD ||
 const [cmd, ...rest] = argv;
 const commands = {
   new: cmdNew, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, next: (b) => startNext(b), start: cmdStart,
-  answer: cmdAnswer, clean: cmdClean, save: cmdSave, config: cmdConfig, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+  answer: cmdAnswer, clean: cmdClean, save: cmdSave, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
 };
 if (!cmd || !commands[cmd]) {
   console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
