@@ -856,13 +856,11 @@ export default class HerdrBoard extends View {
     this.input.on("submit", (_e, cx) => this.create(cx));
     this.fields = [this.input, this.context, this.constraints, this.doneLooks];
     if (!globalThis.__hbTabKeys) {
-      for (const context of ["NewCard > Input", "Input"]) {
-        try {
-          cx.bind_keys([{ keystroke: "tab", action: "new-card-next", context }, { keystroke: "shift-tab", action: "new-card-prev", context }]);
-          globalThis.__hbTabKeys = true;
-          break;
-        } catch { /* try the plainer context */ }
-      }
+      // Only inside our own dialog: the keymap is the whole app's, so a bare "Input" context would take Tab from every other input.
+      try {
+        cx.bind_keys([{ keystroke: "tab", action: "new-card-next", context: "NewCard > Input" }, { keystroke: "shift-tab", action: "new-card-prev", context: "NewCard > Input" }]);
+        globalThis.__hbTabKeys = true;
+      } catch { /* the on_key_down handler below still moves between fields where the text area lets it through */ }
     }
     for (const st of this.fields) st.on("focus", () => { this.focused = st; });
     this.focused = this.input;
