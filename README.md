@@ -62,6 +62,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | you | `unapprove <id>` | back to To do, not approved (only before the card starts) |
 | you | `next` / `start <id>` | start queued cards up to `maxParallel` / start one now |
 | timer | `tick` | `next`, but only if `autoStart` is on and its interval has passed (the panel calls it every 30 s) |
+| you | `show <id>` / `update <id> --hash <h> --fields <enc>` | the card's form fields as JSON / change a card that has not started (what the panel's card form uses; refuses if the file changed since `show`) |
 | you | `answer <id> ["text"]` | send your answers to the live session |
 | you | `press <id> <key>...` | answer the prompt a blocked agent is showing (a permission prompt or a single-question AskUserQuestion) by pressing that option's number, then watch its screen for 8 s. Never sends the same answer twice: after a send that did not seem to land, it only looks again. The panel's option buttons and Retry run this |
 | you | `ls [--json]` | the board; `--json` is what the Herdr panel reads |
@@ -129,7 +130,7 @@ it from the keyboard (not Ctrl+B: Claude Code uses it).
 | | |
 |---|---|
 | Position | beside the sidebar, or across the top |
-| Clicking a card | opens its live session (✎ opens the card), or opens the card (an Open button opens the session) |
+| Clicking a card | opens its live session (✎ opens the card), or opens the card form (an Open button opens the session). The form is the New card form filled in; fields are changeable until the card starts, then greyed (Edit as text opens the Markdown file) |
 | Compact cards | To do, Ready, Done and Archived on one line |
 | Show Done | |
 | Show Archived | cleaned cards, in their own column (folded by default in the side panel) |
