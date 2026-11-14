@@ -183,7 +183,31 @@ function display(card, live) {
 
 // ---------- commands ----------
 
-function cmdNew(board, [repo, ...titleWords]) {
+// Fills the template from the panel's form. Empty fields keep the template's defaults.
+function applyFields(tpl, f) {
+  const clean = (v) => String(v ?? '').replace(/[\r\n]+/g, ' ').trim();
+  let out = tpl;
+  const front = (key, val) => {
+    if (val) out = out.replace(new RegExp(`^${key}:[^\\n]*`, 'm'), () => `${key}: ${val}`);
+  };
+  front('done', clean(f.done));
+  front('model', clean(f.model));
+  front('effort', clean(f.effort));
+  if (f.approved) front('approved', 'true');
+  const section = (name, text) => {
+    const body = String(text ?? '').trim();
+    if (!body) return;
+    out = out.replace(new RegExp(`(## ${name}\\n\\n)[\\s\\S]*?(\\n\\n## )`), (_m, a, b) => a + body + b);
+  };
+  section('Context', f.context);
+  section('Constraints', f.constraints);
+  section('Done looks like', f.doneLooks);
+  return out;
+}
+
+function cmdNew(board, args) {
+  const fields = takeFlag(args, '--fields');   // encodeURIComponent(JSON) from the panel's form
+  const [repo, ...titleWords] = args;
   const title = titleWords.join(' ').trim();
   if (!repo || !title) die('usage: new <repo> "<title>"');
   const r = board.repos[repo];
@@ -197,7 +221,15 @@ function cmdNew(board, [repo, ...titleWords]) {
     .replaceAll('{{id}}', id).replaceAll('{{repo}}', repo).replaceAll('{{title}}', title)
     .replaceAll('{{created}}', now());
   const path = cardPath(board, id);
-  writeAtomic(path, tpl);
+  let text = tpl;
+  if (fields) {
+    let f;
+    try { f = JSON.parse(decodeURIComponent(fields)); } catch { die('--fields is not valid encoded JSON'); }
+    if (f.model && !MODELS.includes(f.model)) die(`model must be one of ${MODELS.join(', ')}`);
+    if (f.effort && !EFFORTS.includes(f.effort)) die(`effort must be one of ${EFFORTS.join(', ')}`);
+    text = applyFields(tpl, f);
+  }
+  writeAtomic(path, text);
   console.log(`${id}  ${slash(path)}`);
 }
 
