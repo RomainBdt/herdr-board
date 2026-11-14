@@ -55,7 +55,8 @@ function vertical() { const p = props() ?? {}; return p.slot ? p.slot === "side"
 function norm(c) { return { machine: c?.machine || null, script: (c?.script || "").trim(), board: (c?.board || "").trim() }; }
 function conns() {
   const s = S();
-  return Array.isArray(s.boards) && s.boards.length ? s.boards.map(norm) : [norm(s)];
+  const list = Array.isArray(s.boards) && s.boards.length ? s.boards.map(norm) : [norm(s)];
+  return list.filter((c, i) => list.findIndex((o) => connKey(o) === connKey(c)) === i);   // the same board twice: once
 }
 function connKey(c) { return `${c.machine || ""}|${c.script}|${c.board}`; }
 function machineName(c) { return c.machine || "This computer"; }
@@ -95,7 +96,7 @@ export default class HerdrBoard extends View {
     // One entry per connection, by connKey: {data (last `ls --json`), error, loading, last, seen}.
     // Each board is read on its own, so a slow ssh machine never holds up the local board.
     this.srcs = {};
-    this.busy = "";            // what a button is doing now ("Planning…")
+    this.jobs = [];            // what the buttons are doing now ("Planning…"), several at once
     this.columns = {};         // connKey|id -> column, to notice a card arriving in needs-you
     this.bump = shared(BUMP);
     // One timer: a dialog's change (bump), a settings change, or the refresh interval.
@@ -152,7 +153,7 @@ export default class HerdrBoard extends View {
   // The cards of every board, each knowing its board: conn (where its CLI runs), board (label), key (unique).
   allCards() {
     return this.boards().flatMap((b) => (b.data?.cards ?? []).map((c) =>
-      ({ ...c, conn: b.conn, board: b.label, key: `${connKey(b.conn)}|${c.id}`, uid: `b${b.i}-${safeId(c.id)}` })));
+      ({ ...c, conn: b.conn, boardLabel: b.label, key: `${connKey(b.conn)}|${c.id}`, uid: `b${b.i}-${safeId(c.id)}` })));
   }
 
   multi() { return conns().length > 1; }
@@ -162,13 +163,15 @@ export default class HerdrBoard extends View {
   refreshOne(cx, conn) {
     const k = connKey(conn);
     const src = (this.srcs[k] ??= { data: null, error: "", loading: false, last: 0, seen: false });
-    if (src.loading) return;
+    if (src.loading) { src.again = true; return; }   // read again once this one ends: it may predate an action
     src.loading = true;
+    src.again = false;
     src.last = Date.now();
     cx.spawn(async (cx) => {
       const r = await cli(conn, ["ls", "--json"]);
       src.loading = false;
       if (this.srcs[k] !== src) return;     // the connection was removed meanwhile
+      if (src.again) this.refreshOne(cx, conn);
       // a board that fails keeps showing its last cards, with the error in the header
       if (!r.ok) { src.error = explain(r.err, conn); cx.notify(); return; }
       try { src.data = JSON.parse(r.out); src.error = ""; } catch { src.error = "the board answered something that isn't JSON"; }
@@ -192,7 +195,7 @@ export default class HerdrBoard extends View {
       const before = this.columns[c.key];
       this.columns[c.key] = c.column;
       if (first || before === c.column) continue;
-      const who = multi ? `${c.id} (${c.board})` : c.id;
+      const who = multi ? `${c.id} (${c.boardLabel})` : c.id;
       if (c.column === "needs-you" && s.notifyNeeds) {
         playSound("blocked");
         notify({ title: `${who} needs you`, body: c.questions.length ? `${c.questions.length} question(s): ${c.questions[0]}` : c.note || c.title, level: "warning" });
@@ -222,12 +225,15 @@ export default class HerdrBoard extends View {
   terminal(card) { const m = card.conn.machine; return m ? `${m}/${card.address}` : card.address; }
 
   // A card's command runs on that card's board.
+  get busy() { return this.jobs?.join(" · ") ?? ""; }
+  job(label) { this.jobs.push(label); return () => { const i = this.jobs.indexOf(label); if (i >= 0) this.jobs.splice(i, 1); }; }
+
   act(cx, label, args, timeout, conn) {
-    this.busy = label;
+    const end = this.job(label);
     cx.notify();
     cx.spawn(async (cx) => {
       const r = await cli(conn, args, timeout);
-      this.busy = "";
+      end();
       if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed`, body: r.err.slice(0, 300), level: "error" });
       this.refreshOne(cx, conn);
       cx.notify();
@@ -236,14 +242,18 @@ export default class HerdrBoard extends View {
 
   // Plan and Start next: on every board at once; a board that fails says so in its own toast.
   actAll(cx, label, args, timeout) {
-    this.busy = label;
+    const all = this.boards();
+    const list = all.filter((b) => b.data && !b.error);   // a board that can't be read now would only time out
+    const skipped = all.filter((b) => !list.includes(b));
+    if (skipped.length) notify({ title: `${label.replace(/…$/, "")}: skipped ${skipped.map((b) => b.label).join(", ")}`, body: "That board can't be read right now (see the header).", level: "warning" });
+    if (!list.length) return;
+    const end = this.job(label);
     cx.notify();
-    const list = this.boards();
     let left = list.length;
     for (const b of list) cx.spawn(async (cx) => {
       const r = await cli(b.conn, args, timeout);
-      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed${list.length > 1 ? ` on ${b.label}` : ""}`, body: r.err.slice(0, 300), level: "error" });
-      if (--left === 0) this.busy = "";
+      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed${all.length > 1 ? ` on ${b.label}` : ""}`, body: r.err.slice(0, 300), level: "error" });
+      if (--left === 0) end();
       this.refreshOne(cx, b.conn);
       cx.notify();
     });
@@ -333,7 +343,7 @@ export default class HerdrBoard extends View {
           .child(div().flex_shrink_0().text_size(11).font_semibold().text_color(c.color).child(c.id))
           .child(div().min_w(0).flex_1().truncate().text_size(12.5).font_medium().text_color(t.foreground).child(c.title))
           .when(this.multi(), (el) => el.child(div().flex_shrink_0().max_w(110).truncate().px(5).rounded(4).bg(t.raised)
-            .text_size(10.5).text_color(t.muted).child(c.board)))
+            .text_size(10.5).text_color(t.muted).child(c.boardLabel)))
           .when(live, (el) => el.child(div().flex_shrink_0().text_size(11).text_color(t.working)
             .frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90))))
         .when(!compact, (el) => el.child(div().text_size(11).text_color(t.dim).truncate().child(`${c.repo} · ${model} · ${c.done}`)))
@@ -354,8 +364,8 @@ export default class HerdrBoard extends View {
     const needs = cards.filter((c) => c.column === "needs-you").length;
     const error = this.errorText();
     const header = h_flex().h(38).px(12).gap(8).items_center().flex_shrink_0().border_b(1).border_color(t.border)
-      .child(div().text_size(13).font_semibold().text_color(t.foreground).child(this.title()))
-      .child(div().text_size(11.5).text_color(t.muted).child(this.runningText()))
+      .child(div().text_size(13).font_semibold().text_color(t.foreground).child(this.heading()))
+      .child(div().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(this.runningText()))
       .when(needs > 0, (el) => el.child(div().px(7).py(1).rounded_full().bg(t.blocked).text_color(t.solid_foreground)
         .text_size(11).font_semibold().child(`${needs} need${needs > 1 ? "" : "s"} you`)))
       .when(Boolean(this.busy), (el) => el.child(div().text_size(11.5).text_color(t.working).child(this.busy)))
@@ -386,16 +396,17 @@ export default class HerdrBoard extends View {
   cards() { return this.allCards().filter((c) => c.column !== "done" || S().showDone); }
 
   // Header bits for both layouts: the title, "2/3 running" per board, one error line per board.
-  title() { const b = this.boards(); return b.length === 1 ? b[0].data?.board || "Board" : "Boards"; }
+  heading() { const b = this.boards(); return b.length === 1 ? b[0].data?.board || "Board" : "Boards"; }
   runningText() {
     const b = this.boards();
     if (b.length === 1) return b[0].data ? `${b[0].data.running}/${b[0].data.maxParallel} running` : "loading…";
     return b.map((x) => `${x.label} ${x.data ? `${x.data.running}/${x.data.maxParallel}` : "…"}`).join(" · ");
   }
-  errorText() {
+  errors() {
     const b = this.boards();
-    return b.filter((x) => x.error).map((x) => (b.length > 1 ? `${x.label}: ${x.error}` : x.error)).join(" · ");
+    return b.filter((x) => x.error).map((x) => (b.length > 1 ? `${x.label}: ${x.error}` : x.error));
   }
+  errorText() { return this.errors().join(" · "); }
 
   // ---------- vertical panel: sections, most urgent first ----------
 
@@ -417,10 +428,10 @@ export default class HerdrBoard extends View {
     const t = theme();
     const cards = this.cards();
     const needs = cards.filter((c) => c.column === "needs-you").length;
-    const errors = this.boards().filter((b) => b.error).map((b) => (this.multi() ? `${b.label}: ${b.error}` : b.error));
+    const errors = this.errors();
     const header = v_flex().px(12).py(8).gap(6).flex_shrink_0().border_b(1).border_color(t.border)
       .child(h_flex().gap(6).items_center()
-        .child(div().flex_1().min_w(0).truncate().text_size(13).font_semibold().child(this.title()))
+        .child(div().flex_1().min_w(0).truncate().text_size(13).font_semibold().child(this.heading()))
         .child(button("b-ref", "↻", (cx) => this.refresh(cx), { tip: "Refresh now" }))
         .child(button("b-set", "⚙", () => this.openSettings(), { tip: "Board settings" })))
       .child(h_flex().gap(6).items_center()
@@ -476,6 +487,7 @@ export default class HerdrBoard extends View {
     row.script.on("change", later);
     row.boardDir.on("change", later);
     if (row.maxParallel == null) this.loadRow(cx, row);   // a board not read yet
+    else row.loaded = connKey(this.rowConn(row));
     return row;
   }
 
@@ -484,6 +496,7 @@ export default class HerdrBoard extends View {
   // Reads the row's board.json values (after opening, adding, or changing where it points).
   loadRow(cx, row) {
     const conn = this.rowConn(row);
+    row.loaded = connKey(conn);
     if (!conn.script || !conn.board) return;
     cx.spawn(async (cx) => {
       const r = await cli(conn, ["ls", "--json"]);
@@ -502,7 +515,7 @@ export default class HerdrBoard extends View {
     const before = conns();
     if (JSON.stringify(boards.map(norm)) === JSON.stringify(before)) return;
     setS({ boards });
-    if (cx) this.rows.forEach((r, i) => { if (!before[i] || connKey(before[i]) !== connKey(norm(boards[i]))) this.loadRow(cx, r); });
+    if (cx) for (const r of this.rows) if (r.loaded !== connKey(this.rowConn(r))) this.loadRow(cx, r);
   }
 
   addRow(cx) {
@@ -569,6 +582,8 @@ export default class HerdrBoard extends View {
         .child(div().flex_1().min_w(0).truncate().text_size(12.5).font_semibold()
           .child(r.name ? `${r.name} · ${machineName(this.rowConn(r))}` : `Board ${i + 1} · ${machineName(this.rowConn(r))}`))
         .when(many, (el) => el.child(button(`rm-${r.n}`, "Remove", (cx) => { this.removeRow(cx, r); cx.notify(); }, { tone: t.muted, tip: "Stop showing this board (nothing is deleted)" }))))
+      .when(this.rows.findIndex((o) => connKey(this.rowConn(o)) === connKey(this.rowConn(r))) < i,
+        (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Same machine and folder as a board above: shown once.")))
       .child(row("Machine", "Where its repos and agents are",
         seg(`mach-${r.n}`, [...new Set([r.machine, ...known])].map((m) => [m, m || "This computer"]), r.machine,
           (v, cx) => { r.machine = v; this.saveRows(cx); })))
