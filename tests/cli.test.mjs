@@ -248,4 +248,15 @@ describe('card-creator skill: model and effort chosen at creation', () => {
     assert.equal(card('TST-1').meta.model, 'sonnet');
     assert.equal(card('TST-1').meta.effort, 'medium');
   });
+
+  test('update changes a Ready card', () => {
+    assert.equal(b.run('new', 'app', 'Edit me').code, 0);
+    assert.equal(b.run('approve', 'TST-1').code, 0);
+    const hash = JSON.parse(b.run('show', 'TST-1').out).hash;
+    const enc = encodeURIComponent(JSON.stringify({ title: 'Edited', done: 'local', model: 'sonnet', effort: 'medium', context: 'x' }));
+    const r = b.run('update', 'TST-1', '--hash', hash, '--fields', enc);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(card('TST-1').meta.title, 'Edited');
+    assert.equal(card('TST-1').meta.status, 'ready');   // saving does not change the status
+  });
 });
