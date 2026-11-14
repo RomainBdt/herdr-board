@@ -143,6 +143,13 @@ For a separate machine, run `./deploy.sh <machine> <folder>` to copy the CLI the
 Click **+** to make a card, fill in Context / Constraints / Done looks like, approve, **Start next**.
 Cards that need you move to **Needs you**: answer there. The command line does the same (see Commands).
 
+**Card creator skill.** In any Claude Code session, ask "create a card for ...". The `card-creator` skill (`skills/card-creator/SKILL.md`)
+turns your request into a card with the template's sections (Context, Constraints, Done looks like), a done target,
+and a model and effort it chooses itself. It shows you the card, asks "Create it?", then runs `new --fields-file`. It never
+approves the card. Because model and effort are already set, no Haiku call is made when you approve. Cards you create by
+hand, with the model left empty, still go through the Auto choice. `./install.sh` copies the skill to `~/.claude/skills/`
+(or `$CLAUDE_HOME/skills/`); to use it where the CLI runs (the server), copy the `card-creator` folder there by hand.
+
 ## Layout on the server
 
 ```

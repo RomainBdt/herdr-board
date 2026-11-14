@@ -1,9 +1,9 @@
 // The command line, run as a child process on a throwaway board (see helpers.mjs: no `hc`, no real board).
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tempBoard, cardText } from './helpers.mjs';
+import { tempBoard, cardText, ROOT } from './helpers.mjs';
 
 process.env.HERDR_BOARD_NO_MAIN = '1';
 const { parseCard, section } = await import('../herdr-board.mjs');
@@ -195,5 +195,57 @@ describe('ls: archived order', () => {
     b.write('TST-5', cardText({ id: 'TST-5', title: 'x', repo: 'app', status: 'todo' }));
     const j = JSON.parse(b.run('ls', '--json').out);
     assert.deepEqual(j.cards.filter(c => c.column === 'archived').map(c => c.id), ['TST-3', 'TST-1', 'TST-4', 'TST-2']);
+  });
+});
+
+describe('card-creator skill: model and effort chosen at creation', () => {
+  const skillFile = join(ROOT, 'skills', 'card-creator', 'SKILL.md');
+  const skill = readFileSync(skillFile, 'utf8');
+
+  test('the skill file has a name and a description, and uses the card format\'s names', () => {
+    const head = skill.match(/^---\n([\s\S]*?)\n---\n/)?.[1] || '';
+    assert.match(head, /^name: card-creator$/m);
+    assert.match(head, /^description: .{20,}/m);
+    for (const s of ['Context', 'Constraints', 'Done looks like']) assert.ok(readFileSync(join(ROOT, 'card-template.md'), 'utf8').includes(`## ${s}`), s);
+    for (const f of ['context', 'constraints', 'doneLooks', 'done', 'model', 'effort']) assert.match(skill, new RegExp('`' + f + '`'), f);
+    for (const t of ['none', 'local', 'local-reviewed', 'draft-pr', 'pr-ready', 'merged']) assert.match(skill, new RegExp('`' + t + '`'), t);
+    for (const m of ['haiku', 'sonnet', 'opus']) assert.match(skill, new RegExp('`' + m + '`'), m);
+    for (const e of ['low', 'medium', 'high', 'xhigh']) assert.match(skill, new RegExp('`' + e + '`'), e);
+  });
+
+  test('the skill\'s own JSON example makes a card with model and effort set, not approved', () => {
+    const json = skill.match(/```json\r?\n([\s\S]*?)\r?\n\s*```/)?.[1];
+    assert.ok(json, 'no json example in the skill');
+    const file = join(b.dir, 'fields.json');
+    writeFileSync(file, json);
+    const r = b.run('new', 'app', 'From the skill', '--fields-file', file);
+    assert.equal(r.code, 0, r.err);
+    const c = card('TST-1');
+    assert.ok(['haiku', 'sonnet', 'opus'].includes(c.meta.model), c.meta.model);
+    assert.ok(['low', 'medium', 'high', 'xhigh'].includes(c.meta.effort), c.meta.effort);
+    assert.equal(c.meta.approved, 'false');
+    assert.doesNotMatch(b.read('TST-1'), /\{\{/);
+  });
+
+  test('approving a created card keeps its model and effort and skips the Auto choice', () => {
+    const file = join(b.dir, 'fields.json');
+    writeFileSync(file, JSON.stringify({ context: 'c', done: 'local', model: 'opus', effort: 'xhigh', approved: true }));
+    assert.equal(b.run('new', 'app', 'Chosen', '--fields-file', file).code, 0);
+    assert.equal(card('TST-1').meta.model, 'opus');
+    assert.equal(card('TST-1').meta.effort, 'xhigh');
+    const r = b.run('approve', 'TST-1');
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /ready \(opus\/xhigh\)/);
+    assert.equal(card('TST-1').meta.auto_choice, undefined);   // chooseAuto did not run
+  });
+
+  test('a hand-made card without a model still goes through the Auto choice', () => {
+    assert.equal(b.run('new', 'app', 'By hand').code, 0);
+    assert.equal(card('TST-1').meta.model, '');
+    const r = b.run('approve', 'TST-1');   // `claude` is hidden in tests: the choice falls back to sonnet/medium
+    assert.equal(r.code, 0, r.err);
+    assert.match(card('TST-1').meta.auto_choice, /^Haiku choice failed/);
+    assert.equal(card('TST-1').meta.model, 'sonnet');
+    assert.equal(card('TST-1').meta.effort, 'medium');
   });
 });
