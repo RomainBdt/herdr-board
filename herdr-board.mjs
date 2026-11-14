@@ -526,19 +526,24 @@ function startCard(board, card) {
 // .claude/settings.local.json allowing what /ship needs (merged into any existing file).
 const SHIP_ALLOW = ['Bash(gh pr create:*)', 'Bash(gh pr edit:*)', 'Bash(gh pr checks:*)',
   'Bash(gh issue create:*)', 'Bash(gh label create:*)', 'Bash(git push:*)'];
-// gh pr merge is allowed only when the card's done target is "merged".
+// gh pr merge is allowed only when the card's done target is "merged"; otherwise it is denied.
+const MERGE_RULE = 'Bash(gh pr merge:*)';
 function allowShipCommands(wt, card) {
   const merges = (card.meta.done || '').split('#')[0].trim() === 'merged';
-  const wanted = merges ? ['Bash(gh pr merge:*)', ...SHIP_ALLOW] : SHIP_ALLOW;
+  const wanted = merges ? [MERGE_RULE, ...SHIP_ALLOW] : SHIP_ALLOW;
   try {
     const file = join(wt, '.claude', 'settings.local.json');
     let cfg = {};
     if (existsSync(file)) cfg = JSON.parse(readFileSync(file, 'utf8'));   // unreadable: throws, file left alone
     cfg.permissions = cfg.permissions || {};
-    const allow = Array.isArray(cfg.permissions.allow) ? cfg.permissions.allow : [];
-    const missing = wanted.filter(r => !allow.includes(r));
-    if (missing.length) {
-      cfg.permissions.allow = [...allow, ...missing];
+    let allow = Array.isArray(cfg.permissions.allow) ? cfg.permissions.allow : [];
+    let deny = Array.isArray(cfg.permissions.deny) ? cfg.permissions.deny : [];
+    if (merges) deny = deny.filter(r => r !== MERGE_RULE);
+    else { allow = allow.filter(r => r !== MERGE_RULE); if (!deny.includes(MERGE_RULE)) deny = [...deny, MERGE_RULE]; }
+    const next = [...allow, ...wanted.filter(r => !allow.includes(r))];
+    if (JSON.stringify(next) !== JSON.stringify(cfg.permissions.allow) || JSON.stringify(deny) !== JSON.stringify(cfg.permissions.deny)) {
+      cfg.permissions.allow = next;
+      if (deny.length) cfg.permissions.deny = deny; else delete cfg.permissions.deny;
       mkdirSync(dirname(file), { recursive: true });
       writeAtomic(file, JSON.stringify(cfg, null, 2) + '\n');
     }
