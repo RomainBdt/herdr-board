@@ -281,8 +281,27 @@ function cmdNew(board, args) {
   console.log(`${id}  ${slash(path)}`);
 }
 
+// A done card whose agent starts a new turn (the person talked to its session) goes back to running.
+// The agent's own closing turn right after `done` does not count: a grace period covers it.
+function reopenDone(board, live) {
+  for (const c of allCards(board)) {
+    if (c.meta.status !== 'done') continue;
+    const t = live[termName(c.id)];
+    if (!t || ['done', 'idle', 'blocked', 'error'].includes(t.status)) continue;
+    if (Date.now() - Number(c.meta.done_ms || 0) < 120000) continue;
+    const card = loadCard(board, c.id);
+    card.meta.status = 'running';
+    delete card.meta.outcome;
+    delete card.meta.done_ms;
+    card.meta.active_ms = String(Date.now());
+    card.meta.updated = now();
+    saveCard(card);
+  }
+}
+
 function cmdLs(board, args) {
   const live = liveTerminals(board);
+  reopenDone(board, live);
   const cards = allCards(board).map(c => {
     const d = display(c, live);
     const repo = board.repos[c.meta.repo] || {};
@@ -389,6 +408,7 @@ function cmdDone(board, args) {
   const w = whereOf(card);
   setSection(card, 'Where we are', `- Goal: ${w.goal}\n- Done: ${w.done}\n- Next: nothing, card done (see Result)`);
   card.meta.status = 'done';
+  card.meta.done_ms = String(Date.now());
   card.meta.updated = now();
   saveCard(card);
   console.log(`${card.id}: done. Your session stays open; the person may still talk to you.`);
