@@ -44,6 +44,7 @@ herdr-board/                 this code, copied by ./deploy.sh
 `ask`s (all its questions at once; card goes to **needs-you**) or calls `done`.
 → you write answers under `## Answers` and run `answer <id>` (or `answer <id> "text"`); the agent continues.
 `ask` and `done` start the next card in the queue.
+A done card whose agent starts a new turn (you talk to its session, 3 minutes after `done`) goes back to **running**.
 
 Every card has a **Next action** section at the top, rewritten by the tool on each save from the status and the `done:` target:
 it says whether something is on you (approve, answer, review, merge) or nothing is.

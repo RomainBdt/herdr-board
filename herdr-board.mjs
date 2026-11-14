@@ -281,8 +281,32 @@ function cmdNew(board, args) {
   console.log(`${id}  ${slash(path)}`);
 }
 
+// A done card whose agent starts a new turn (the person talked to its session) goes back to running.
+// The agent's own closing turn right after `done` does not count: a grace period covers it.
+function reopenDone(board, live) {
+  for (const c of allCards(board)) {
+    if (c.meta.status !== 'done') continue;
+    const t = live[termName(c.id)];
+    if (!t || ['done', 'idle', 'blocked', 'error'].includes(t.status)) continue;
+    if (Date.now() - Number(c.meta.done_ms || 0) < 180000) continue;
+    const card = loadCard(board, c.id);
+    // re-check on the fresh file: the agent may have run `done` since the board was listed
+    if (card.meta.status !== 'done' || Date.now() - Number(card.meta.done_ms || 0) < 180000) continue;
+    card.meta.status = 'running';
+    delete card.meta.outcome;
+    delete card.meta.done_ms;
+    setSection(card, 'Where we are', `- Goal: ${whereOf(card).goal}
+- Done: see Result
+- Next: working on a new request from the person`);
+    card.meta.active_ms = String(Date.now());
+    card.meta.updated = now();
+    saveCard(card);
+  }
+}
+
 function cmdLs(board, args) {
   const live = liveTerminals(board);
+  reopenDone(board, live);
   const cards = allCards(board).map(c => {
     const d = display(c, live);
     const repo = board.repos[c.meta.repo] || {};
@@ -389,6 +413,7 @@ function cmdDone(board, args) {
   const w = whereOf(card);
   setSection(card, 'Where we are', `- Goal: ${w.goal}\n- Done: ${w.done}\n- Next: nothing, card done (see Result)`);
   card.meta.status = 'done';
+  card.meta.done_ms = String(Date.now());
   card.meta.updated = now();
   saveCard(card);
   console.log(`${card.id}: done. Your session stays open; the person may still talk to you.`);
@@ -707,6 +732,8 @@ function terminalsIn(board, dir) {
   return (r?.terminals || []).filter(t => { const c = norm(t.cwd); return c === root || c.startsWith(root + '/'); });
 }
 
+function openIn(board, dir) { return terminalsIn(board, dir).map(t => `${t.name || t.address} (${t.address})`); }
+
 function stopTerminalsIn(board, dir) {
   const stopped = [];
   for (const t of terminalsIn(board, dir)) {
@@ -758,13 +785,13 @@ function cmdClean(board, [id]) {
         if (left.length) die(`${card.id}: ${card.meta.worktree} is not a git worktree but has ${left.length} file(s) (${left.slice(0, 5).join(', ')}); left in place`);
         try { retryBusy(() => rmdirSync(card.meta.worktree)); did.push('empty leftover worktree folder removed'); }
         catch (e2) {
-          const still = terminalsIn(board, card.meta.worktree).map(t => `${t.name || t.address} (${t.address})`);
+          const still = openIn(board, card.meta.worktree);
           die(`${card.id}: could not remove empty folder ${card.meta.worktree}: ${e2.message}${still.length ? `. Still open in: ${still.join(', ')}` : ''}`);
         }
       } else {
         let files = '';
         try { files = git(['-C', card.meta.worktree, 'status', '--porcelain']).split('\n').filter(Boolean).slice(0, 8).join('; '); } catch { /* none */ }
-        const still = terminalsIn(board, card.meta.worktree).map(t => `${t.name || t.address} (${t.address})`);
+        const still = openIn(board, card.meta.worktree);
         die(`${card.id}: worktree not removed, left in place (${card.meta.worktree}). ${files ? `Changes: ${files}. ` : ''}${still.length ? `Still open in: ${still.join(', ')}. ` : ''}Git said: ${why}`);
       }
     }
