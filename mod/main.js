@@ -63,12 +63,13 @@ function vertical() { const p = props() ?? {}; return p.slot ? p.slot === "side"
 function norm(c) { return { machine: c?.machine || null, script: (c?.script || "").trim(), board: (c?.board || "").trim(), off: c?.enabled === false || c?.off === true }; }
 // As saved (duplicates included); conns() is what the panel reads.
 function stored() { const s = S(); return Array.isArray(s.boards) && s.boards.length ? s.boards.map(norm) : [norm(s)]; }
-function conns() {
-  const list = stored().filter((c) => !c.off);   // a switched-off board is kept in the settings but not read or shown
-  return list.filter((c, i) => list.findIndex((o) => connKey(o) === connKey(c)) === i);   // the same board twice: once
-}
+function once(list) { return list.filter((c, i) => list.findIndex((o) => connKey(o) === connKey(c)) === i); }   // the same board twice: once
+// every board in the settings, switched off ones included (the settings dialog lists them all)
+function listed() { return once(stored()); }
+function conns() { return once(stored().filter((c) => !c.off)); }   // a switched-off board is kept in the settings but not read or shown
 // The panel can't read anything until a board has both its CLI path and its folder.
 function configured() { return conns().some((c) => c.script && c.board); }
+function allOff() { return stored().length > 0 && stored().every((c) => c.off && c.script && c.board); }
 function connKey(c) { return `${c.machine || ""}|${c.script}|${c.board}`; }
 function machineName(c) { return c.machine || "This computer"; }
 // A card id is unique on its own board only: the same repo on two machines gives two HB-4.
@@ -459,7 +460,7 @@ export default class HerdrBoard extends View {
   emptyState() {
     const t = theme();
     return v_flex().id("unconfigured").flex_1().min_h(0).items_center().justify_center().gap(10).p(16)
-      .child(div().text_size(12.5).text_color(t.muted).child("Set the machine and the paths in ⚙ → Boards"))
+      .child(div().text_size(12.5).text_color(t.muted).child(allOff() ? "Every board is switched off. Switch one on in ⚙ → Boards" : "Set the machine and the paths in ⚙ → Boards"))
       .child(button("b-conn", "Open settings", () => this.openSettings(), { primary: true }));
   }
 
@@ -546,7 +547,7 @@ export default class HerdrBoard extends View {
     this.msg = "";
     this.serial = 0;
     const server = props().server ?? {};
-    this.rows = conns().map((c) => this.makeRow(cx, c, server[connKey(c)]));
+    this.rows = listed().map((c) => this.makeRow(cx, c, server[connKey(c)]));
   }
 
   makeRow(cx, c, known) {
@@ -558,7 +559,7 @@ export default class HerdrBoard extends View {
     const later = (_e, cx) => { this.pending?.cancel(); this.pending = cx.timer.after(800, (cx) => this.saveRows(cx)); };
     row.script.on("change", later);
     row.boardDir.on("change", later);
-    if (row.maxParallel == null) this.loadRow(cx, row);   // a board not read yet
+    if (row.maxParallel == null) { if (row.enabled) this.loadRow(cx, row); }   // a board not read yet (a switched-off one is read when switched on)
     else row.loaded = connKey(this.rowConn(row));
     return row;
   }
@@ -588,7 +589,7 @@ export default class HerdrBoard extends View {
     const boards = this.rows.map((r) => this.rowSaved(r));
     if (JSON.stringify(boards.map(norm)) === JSON.stringify(stored())) return;   // as saved, duplicates included
     setS({ boards });
-    if (cx) for (const r of this.rows) if (r.loaded !== connKey(this.rowConn(r))) this.loadRow(cx, r);
+    if (cx) for (const r of this.rows) if (r.enabled && r.loaded !== connKey(this.rowConn(r))) this.loadRow(cx, r);
   }
 
   addRow(cx) {
@@ -662,7 +663,7 @@ export default class HerdrBoard extends View {
           .child(r.name ? `${r.name} · ${machineName(this.rowConn(r))}` : `Board ${i + 1} · ${machineName(this.rowConn(r))}`))
         .child(seg(`en-${r.n}`, [[true, "On"], [false, "Off"]], r.enabled, (v, cx) => { r.enabled = v; this.saveRows(cx); }))
         .when(many, (el) => el.child(button(`rm-${r.n}`, "Remove", (cx) => { this.removeRow(cx, r); cx.notify(); }, { tone: t.muted, tip: "Stop showing this board (nothing is deleted)" }))))
-      .when(this.rows.findIndex((o) => connKey(this.rowConn(o)) === connKey(this.rowConn(r))) < i,
+      .when(r.enabled && this.rows.findIndex((o) => o.enabled && connKey(this.rowConn(o)) === connKey(this.rowConn(r))) < i,
         (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Same machine and folder as a board above: shown once.")))
       .child(row("Machine", "Where its repos and agents are",
         seg(`mach-${r.n}`, [...new Set([r.machine, ...known])].map((m) => [m, m || "This computer"]), r.machine,
