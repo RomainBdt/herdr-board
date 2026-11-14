@@ -523,7 +523,8 @@ function startCard(board, card) {
 }
 
 // Claude Code can't scope a permission to a folder, so each card worktree gets its own untracked
-// .claude/settings.local.json allowing what /ship needs (merged into any existing file).
+// .claude/settings.local.json allowing what /ship needs and denying gh pr merge unless the card merges
+// (merged into any existing file).
 const SHIP_ALLOW = ['Bash(gh pr create:*)', 'Bash(gh pr edit:*)', 'Bash(gh pr checks:*)',
   'Bash(gh issue create:*)', 'Bash(gh label create:*)', 'Bash(git push:*)'];
 // gh pr merge is allowed only when the card's done target is "merged"; otherwise it is denied.
@@ -538,10 +539,11 @@ function allowShipCommands(wt, card) {
     cfg.permissions = cfg.permissions || {};
     let allow = Array.isArray(cfg.permissions.allow) ? cfg.permissions.allow : [];
     let deny = Array.isArray(cfg.permissions.deny) ? cfg.permissions.deny : [];
+    const before = JSON.stringify([cfg.permissions.allow, cfg.permissions.deny ?? []]);
     if (merges) deny = deny.filter(r => r !== MERGE_RULE);
     else { allow = allow.filter(r => r !== MERGE_RULE); if (!deny.includes(MERGE_RULE)) deny = [...deny, MERGE_RULE]; }
     const next = [...allow, ...wanted.filter(r => !allow.includes(r))];
-    if (JSON.stringify(next) !== JSON.stringify(cfg.permissions.allow) || JSON.stringify(deny) !== JSON.stringify(cfg.permissions.deny)) {
+    if (JSON.stringify([next, deny]) !== before) {
       cfg.permissions.allow = next;
       if (deny.length) cfg.permissions.deny = deny; else delete cfg.permissions.deny;
       mkdirSync(dirname(file), { recursive: true });
