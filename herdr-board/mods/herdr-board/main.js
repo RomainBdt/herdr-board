@@ -29,7 +29,7 @@ const DEFAULTS = {
   click: "session",                  // what clicking a card does: session (open its live session) | card
   compact: true,                     // To do, Ready and Done cards on one line
   showDone: true,
-  showArchived: true,
+  showArchived: false,               // cleaned cards pile up: off until you want them
   refresh: 5,                        // seconds between reads of the board
   notifyNeeds: true,                 // toast + sound when a card needs you
   notifyDone: false,                 // Herdr already says when an agent finishes
@@ -380,9 +380,9 @@ export default class HerdrBoard extends View {
 
   cardView(c, cx) {
     const t = theme();
-    const line = (icon, text, color) => !text ? null :
+    const line = (icon, text, color, wrap) => !text ? null :
       h_flex().gap(5).min_w(0).text_size(11.5).text_color(color ?? t.muted)
-        .child(div().flex_shrink_0().w(12).child(icon)).child(div().min_w(0).truncate().child(text));
+        .child(div().flex_shrink_0().w(12).child(icon)).child(wrap ? div().min_w(0).flex_1().child(text) : div().min_w(0).truncate().child(text));
     const model = `${c.model || "sonnet"} · ${c.effort || "medium"}`;
     const rows = [];
     const compact = S().compact && ["todo", "ready", "done", "archived"].includes(c.column);   // one line + buttons
@@ -395,7 +395,7 @@ export default class HerdrBoard extends View {
     }
     if (c.column === "needs-you") {
       if (c.note) rows.push(line("⚠", c.note, t.blocked));
-      if (c.lastMessage) rows.push(line("💬", c.lastMessage, t.muted));
+      if (c.lastMessage) rows.push(line("💬", c.lastMessage, t.muted, true));
       c.questions.forEach((q, i) => rows.push(line("?", `${i + 1}. ${q}`, t.blocked)));
       const pr = c.prompt;
       if (pr) {

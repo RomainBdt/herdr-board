@@ -225,7 +225,8 @@ function clip(text) {
   if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
   return '…' + tail.trimStart();
 }
-function lastMessageFromTranscript(worktree) {
+// ls runs often: the answer is kept per card in <board>/.last-message and reused while the transcript is unchanged.
+function lastMessageFromTranscript(worktree, cacheFile) {
   const dir = join(homedir(), '.claude', 'projects', String(worktree).replace(/[^A-Za-z0-9]/g, '-'));
   let newest = null;
   for (const f of readdirSync(dir)) {
@@ -234,6 +235,13 @@ function lastMessageFromTranscript(worktree) {
     if (!newest || st.mtimeMs > newest.mtime) newest = { path: join(dir, f), mtime: st.mtimeMs, size: st.size };
   }
   if (!newest) return '';
+  const key = `${newest.path}|${newest.mtime}|${newest.size}`;
+  if (cacheFile) { try { const c = JSON.parse(readFileSync(cacheFile, 'utf8')); if (c.key === key) return c.text; } catch { /* no cache yet */ } }
+  const text = tailMessage(newest);
+  if (cacheFile) { try { mkdirSync(dirname(cacheFile), { recursive: true }); writeAtomic(cacheFile, JSON.stringify({ key, text })); } catch { /* cache is optional */ } }
+  return text;
+}
+function tailMessage(newest) {
   // read the tail, growing it until an assistant text turns up (a long tool result can fill the first chunk)
   const fd = openSync(newest.path, 'r');
   try {
@@ -255,7 +263,7 @@ function lastMessageFromTranscript(worktree) {
 }
 function lastMessageOf(board, card) {
   try {
-    if (card.meta.worktree && existsSync(card.meta.worktree)) { const m = lastMessageFromTranscript(card.meta.worktree); if (m) return m; }
+    if (card.meta.worktree && existsSync(card.meta.worktree)) { const m = lastMessageFromTranscript(card.meta.worktree, join(board.dir, '.last-message', `${card.id}.json`)); if (m) return m; }
   } catch { /* no transcript here (e.g. remote machine): try the terminal */ }
   const screen = hc(board, ['read', termName(card.id)], { json: false, allowFail: true }) || '';
   const lines = screen.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^[─━═\s>❯│╭╰╮╯]*$/.test(l) && !/\? for shortcuts|shift\+tab|esc to interrupt|auto mode|accept edits/i.test(l));
@@ -708,9 +716,19 @@ function cmdTick(board) {
   try { last = Number(readFileSync(file, 'utf8')) || 0; } catch {}
   if (last > Date.now()) last = 0;   // clock moved back
   if (Date.now() - last < board.autoStart.intervalMinutes * 60000) return;
-  writeAtomic(file, String(Date.now()));   // first: a failure below must not make it retry every 30 s
-  try { startNext(board, { quiet: true }); }
-  catch (e) { console.log(`auto-start failed: ${e.message}`); }   // the timer goes on
+  // two panels may tick together: only the one that creates the lock file runs; a lock older than a minute is a crash's leftover
+  const lock = file + '.lock';
+  try { if (Date.now() - statSync(lock).mtimeMs > 60000) unlinkSync(lock); } catch { /* no lock */ }
+  let fd;
+  try { fd = openSync(lock, 'wx'); } catch { return; }   // the other panel has it
+  try {
+    let again = 0;
+    try { again = Number(readFileSync(file, 'utf8')) || 0; } catch {}
+    if (Date.now() - again < board.autoStart.intervalMinutes * 60000 && again <= Date.now()) return;   // the other panel just ran
+    writeAtomic(file, String(Date.now()));   // first: a failure below must not make it retry every 30 s
+    try { startNext(board, { quiet: true }); }
+    catch (e) { console.log(`auto-start failed: ${e.message}`); }   // the timer goes on
+  } finally { closeSync(fd); try { unlinkSync(lock); } catch {} }
 }
 
 function git(args, opts = {}) {
