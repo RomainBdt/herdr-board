@@ -4,8 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 home="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 mkdir -p "$home/mods/herdr-board" "$home/mods/herdr-board-tabs"
-cp mod/main.js mod/mod.json "$home/mods/herdr-board/"
-cp mod-tabs/* "$home/mods/herdr-board-tabs/"
+cp herdr-board/mods/herdr-board/main.js herdr-board/mods/herdr-board/mod.json "$home/mods/herdr-board/"
+cp herdr-board/mods/herdr-board-tabs/* "$home/mods/herdr-board-tabs/"
 cp layout/board.json "$home/layouts/board.json"
 rm -f "$home/layouts/board-side.json"   # older versions had a second layout
 echo "installed the board (mods herdr-board, herdr-board-tabs; layout board)."
