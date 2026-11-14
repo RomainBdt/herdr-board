@@ -454,12 +454,12 @@ function cmdNew(board, args) {
   console.log(`${id}  ${slash(path)}`);
 }
 
-// A Done card stays Done while its agent only answers questions. It goes back to Running only on real new work:
-// its terminal stays busy for REOPEN_BUSY_MS in a row (a quick answer takes less), and never during the grace period
-// that covers the agent's own closing turn after `done`. A reopened card remembers its outcome (`reopened_outcome`)
+// A Done card goes back to Running when a new turn starts in its agent session: its terminal is seen busy twice,
+// REOPEN_BUSY_MS apart (filters a one-poll blip), and never during the grace period that covers the agent's own
+// closing turn after `done`. A reopened card remembers its outcome (`reopened_outcome`)
 // and returns to Done by itself once its terminal is idle again, so it never sits in Running after the agent is finished.
-const DONE_GRACE_MS = 180000;
-const REOPEN_BUSY_MS = 300000;
+const DONE_GRACE_MS = 60000;
+const REOPEN_BUSY_MS = 5000;
 function reopenDone(board, live) {
   for (const c of allCards(board)) {
     const t = live[termName(c.id)];

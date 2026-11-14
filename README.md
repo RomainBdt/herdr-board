@@ -164,7 +164,7 @@ board/                       the board folder, on the server
 `ask`s (all its questions at once; card goes to **needs-you**) or calls `done`.
 → you write answers under `## Answers` and run `answer <id>` (or `answer <id> "text"`); the agent continues.
 `ask` and `done` start the next card in the queue.
-A Done card stays **done** while its agent only answers your questions. It goes back to **running** only after real new work: its terminal stays busy for 5 minutes in a row (never within 3 minutes of `done`). Once that agent is idle again the board returns it to **done** with its earlier outcome, so no card stays in Running after its agent has finished. `done` can be run again at any time with a new `--state` (for example after you merge the PR by hand); `--pr <url>` adds the pull request link to the Result.
+A Done card goes back to **running** when a new turn starts in its agent session: its terminal is seen busy twice, a few seconds apart (never within 1 minute of `done`, which covers the agent's own closing turn). Once that agent is idle again the board returns it to **done** with its earlier outcome, so no card stays in Running after its agent has finished. `done` can be run again at any time with a new `--state` (for example after you merge the PR by hand); `--pr <url>` adds the pull request link to the Result.
 
 Every card has a **Next action** section at the top, rewritten by the tool on each save from the status and the `done:` target:
 it says whether something is on you (approve, answer, review, merge) or nothing is.
