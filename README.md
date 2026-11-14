@@ -278,6 +278,18 @@ with `./deploy.sh` (or point the local board at this checkout).
 - Commands for `keys.json`: `herdr-board.answer` (first card with questions), `herdr-board.jump` (its session),
   `herdr-board.settings`, `herdr-board.refresh`, `herdr-board-tabs.toggle`.
 
+## Tests
+
+Node's built-in test runner, nothing to install. From the repo folder:
+
+```
+node tests/run.mjs
+```
+
+(`node --test` also works on Node 21+.) The tests use a throwaway board in the system temp folder and hide `hc`
+and `claude` from the CLI they run, so they never touch your real board or start an agent. `tests/unit.test.mjs` covers the card
+logic (parsing, template fields, next action, board column); `tests/cli.test.mjs` runs `new`, `done`, `where` and `ask`.
+
 ## Licenses and notices
 
 herdr-board is under the license in `LICENSE`. `herdr-board/mods/herdr-board-tabs/` is a modified copy of the `tabs` mod shipped with Herdr,
