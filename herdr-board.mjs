@@ -3,7 +3,7 @@
 // hc terminal in its own git worktree. Runs on the machine that holds the repos (the "server").
 // No packages: Node's standard library only.
 //
-//   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | plan | approve <id> [--model m] [--effort e] | next | start <id>
+//   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | plan | approve <id> [--model m] [--effort e] | unapprove <id> | next | start <id>
 //           answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] "<summary>"
 //
@@ -437,6 +437,19 @@ function cmdApprove(board, args) {
   console.log(`${card.id}: ready (${card.meta.model}/${card.meta.effort})`);
 }
 
+// Undo an approve (or a mistaken Start click) while the card has not started: back to To do, no longer approved.
+function cmdUnapprove(board, args) {
+  const [id] = args;
+  if (!id) die('usage: unapprove <id>');
+  const card = loadCard(board, id);
+  const status = card.meta.status || 'todo';
+  if (status !== 'todo' && status !== 'ready') die(`${card.id} is ${status}: only a card that has not started can go back to To do`);
+  card.meta.approved = 'false';
+  card.meta.status = 'todo';
+  saveCard(card);
+  console.log(`${card.id}: back to To do`);
+}
+
 // Cards that may start, best first: ready ones, and todo ones pre-approved on the card.
 function queue(board) {
   return allCards(board)
@@ -831,7 +844,7 @@ const argv = process.argv.slice(2);
 const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD || join(HERE, '..', 'board'));
 const [cmd, ...rest] = argv;
 const commands = {
-  new: cmdNew, draft: cmdDraft, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, next: (b) => startNext(b), start: cmdStart,
+  new: cmdNew, draft: cmdDraft, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
   answer: cmdAnswer, clean: cmdClean, save: cmdSave, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
 };
 if (!cmd || !commands[cmd]) {
