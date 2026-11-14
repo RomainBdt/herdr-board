@@ -805,8 +805,11 @@ export default class HerdrBoard extends View {
 
   // props.boards: [{conn, label, repos}]. Picking a repo picks its board: the card is made there.
   initNew(cx) {
-    const b = (props().boards ?? []).find((x) => Object.keys(x.repos).length);
-    this.pick = b ? { b: props().boards.indexOf(b), repo: Object.keys(b.repos)[0] } : null;
+    // With one repo in all, it is picked for you; with several, you must choose (the form says so if you don't).
+    const withRepos = (props().boards ?? []).filter((x) => Object.keys(x.repos).length);
+    const all = withRepos.flatMap((x) => Object.keys(x.repos));
+    this.pick = all.length === 1 ? { b: props().boards.indexOf(withRepos[0]), repo: all[0] } : null;
+    this.errs = {};           // mandatory fields found empty on Create: {repo, title}
     this.title = "";
     this.msg = "";
     this.done = "pr-ready";
@@ -820,7 +823,7 @@ export default class HerdrBoard extends View {
     this.constraints = area();
     this.doneLooks = area();
     this.input = InputState.new({ value: "" });
-    this.input.on("change", (_e, cx) => { this.title = this.input.value(); cx.notify(); });
+    this.input.on("change", (_e, cx) => { this.title = this.input.value(); if (this.title.trim()) this.errs.title = ""; cx.notify(); });
     this.input.on("submit", (_e, cx) => this.create(cx));
     this.input.focus();
     cx.timer.after(400, () => this.input.focus());
@@ -829,7 +832,11 @@ export default class HerdrBoard extends View {
   create(cx) {
     const p = props();
     if (this.creating) return;   // a second click or Enter would create a second card
-    if (!this.pick || !this.title.trim()) { this.msg = "Pick a repo and write a title."; cx.notify(); return; }
+    this.errs = {
+      repo: this.pick ? "" : "Pick a repo.",
+      title: this.title.trim() ? "" : "Write a title.",
+    };
+    if (this.errs.repo || this.errs.title) { this.msg = ""; cx.notify(); return; }
     const fields = encodeURIComponent(JSON.stringify({
       done: this.done, model: this.model, effort: this.effort, approved: this.approved,
       context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
@@ -851,7 +858,7 @@ export default class HerdrBoard extends View {
   help(cx) {
     const p = props();
     if (this.creating) return;
-    if (!this.pick) { this.msg = "Pick a repo first."; cx.notify(); return; }
+    if (!this.pick) { this.errs = { ...this.errs, repo: "Pick a repo." }; cx.notify(); return; }
     const fields = encodeURIComponent(JSON.stringify({
       done: this.done, model: this.model, effort: this.effort,
       context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
@@ -877,7 +884,7 @@ export default class HerdrBoard extends View {
       const on = this.pick?.b === bi && this.pick.repo === name;
       return h_flex().id(`repo-${bi}-${safeId(name)}`).h(26).px(10).gap(6).items_center().rounded(7).cursor_pointer()
         .border_1().border_color(on ? color : t.border).bg(on ? t.selected : t.raised)
-        .on_click((_e, cx) => { this.pick = { b: bi, repo: name }; cx.notify(); })
+        .on_click((_e, cx) => { this.pick = { b: bi, repo: name }; this.errs.repo = ""; cx.notify(); })
         .child(div().w(8).h(8).rounded_full().bg(color)).child(div().text_size(12).child(name));
     }));
     const chip = (id, options, current, pick) => h_flex().gap(4).flex_wrap().children(options.map(([v, label, color]) =>
@@ -890,6 +897,7 @@ export default class HerdrBoard extends View {
     const label = (text, hint) => h_flex().gap(8).items_center().pt(8)
       .child(div().text_size(11.5).font_semibold().text_color(t.muted).child(text))
       .when(Boolean(hint), (el) => el.child(div().text_size(11).text_color(t.dim).child(hint)));
+    const err = (text) => div().text_size(11.5).text_color(t.blocked).child(`⚠ ${text}`);
     const area = (state, h) => div().h(h).flex_shrink_0().rounded(8).border_1().border_color(t.input).bg(t.background).p(6)
       .child(Editor.new(state).size_full());
     return v_flex().id("new").size_full().bg(t.popover).text_color(t.foreground)
@@ -904,8 +912,10 @@ export default class HerdrBoard extends View {
           ? boards.map((bd, bi) => v_flex().gap(4).child(div().text_size(11).font_semibold().text_color(t.muted).child(bd.label)).child(repoChips(bd, bi)))
           : boards.map(repoChips))
         .when(!boards.length, (el) => el.child(div().text_size(12).text_color(t.blocked).child("No board could be read yet. Check ⚙ → Boards.")))
+        .when(Boolean(this.errs.repo), (el) => el.child(err(this.errs.repo)))
         .child(label("Title"))
-        .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8))
+        .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(this.errs.title ? t.blocked : t.input).bg(t.background).text_size(12.8))
+        .when(Boolean(this.errs.title), (el) => el.child(err(this.errs.title)))
         .child(label("Context", "Why it matters, what you know, links, files to look at"))
         .child(area(this.context, 110))
         .child(label("Constraints", "What the agent must not do or change"))
