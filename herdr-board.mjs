@@ -9,7 +9,7 @@
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync, rmdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync, rmdirSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -234,6 +234,7 @@ const PRESS_WATCH_MS = 8000;
 
 function promptStateFile(board, id) { return join(board.dir, '.prompt-state', `${id}.json`); }
 function readPromptState(board, id) { try { return JSON.parse(readFileSync(promptStateFile(board, id), 'utf8')); } catch { return null; } }
+function clearPromptState(board, id) { try { unlinkSync(promptStateFile(board, id)); } catch {} }
 function writePromptState(board, id, st) {
   mkdirSync(join(board.dir, '.prompt-state'), { recursive: true });
   writeFileSync(promptStateFile(board, id), JSON.stringify(st));
@@ -244,6 +245,7 @@ function screenOptions(screen) {
   const out = [];
   for (const line of String(screen || '').split('\n')) {
     const m = line.match(/^\s*(?:[❯>›]\s*)?(\d{1,2})\.\s+(\S.*?)\s*$/);
+    if (m && m[1] === '1') out.length = 0;   // a new list starts: keep the last one (the dialog is at the bottom)
     if (m && Number(m[1]) === out.length + 1) out.push({ key: m[1], label: m[2], description: '' });
   }
   return out;
@@ -276,14 +278,16 @@ function pendingAsk(cwd) {
 
 // What a blocked card is waiting on: {kind, text, options:[{key,label,description}], multi, screen, failed}.
 // options is empty when the panel can't answer it (a multi-question form): the person opens the session.
-function promptOf(board, card, live) {
+function promptOf(board, card) {
   const name = termName(card.id);
   const screen = (hc(board, ['read', name], { json: false, allowFail: true }) || '').split('\n').map(l => l.trimEnd()).filter(l => l.trim());
   const body = screen.filter(l => /[A-Za-z0-9]/.test(l) && !/^[─╌]/.test(l));   // drop the ──── and ╌╌╌╌ rules
   const tail = body.slice(-9).join('\n');
   const onScreen = screenOptions(tail);
   let p = { kind: 'screen', text: tail, options: onScreen, multi: false };
-  const qs = pendingAsk(card.meta.worktree);
+  let qs = pendingAsk(card.meta.worktree);
+  // a question left unanswered by an old, interrupted run is not what is on screen now
+  if (qs && !body.join('\n').includes(String(qs[0].question || '').slice(0, 30))) qs = null;
   if (qs) {
     const q = qs[0];
     const single = qs.length === 1 && !q.multiSelect && onScreen.length >= (q.options || []).length && (q.options || []).length > 0;
@@ -293,9 +297,9 @@ function promptOf(board, card, live) {
     };
   }
   const st = readPromptState(board, card.id);
-  const sig = p.options.map(o => o.label).join('|') + '#' + p.text.slice(0, 80);
+  const sig = p.options.map(o => o.label).join('|') + '#' + (p.kind === 'ask' ? p.text.slice(0, 80) : (p.text.split('\n').find(l => /\?\s*$/.test(l)) || '').trim());
   p.sig = sig;
-  if (st && st.sig === sig) p.failed = { choice: st.choice, sent: st.sent };   // answered, yet the dialog is still up
+  if (st && st.sent && !st.done && st.sig === sig) p.failed = { choice: st.choice, sent: st.sent };   // answered, yet the dialog is still up
   return p;
 }
 
@@ -305,10 +309,10 @@ function cmdPress(board, [id, ...keys]) {
   const name = termName(id);
   const live = liveTerminals(board);
   if (!live[name] || live[name].status !== 'blocked') die(`${id}: no prompt is waiting`);
-  const p = promptOf(board, card, live);
+  const p = promptOf(board, card);
   const choice = keys.join(' ');
   const st = readPromptState(board, id);
-  const same = st && st.sig === p.sig;
+  const same = st && !st.done && st.sig === p.sig;
   const watch = () => {
     for (let t = 0; t < PRESS_WATCH_MS; t += 500) {
       sleepMs(500);
@@ -331,8 +335,10 @@ function cmdPress(board, [id, ...keys]) {
   // a number only moves the highlight in some dialogs: press Enter once if the cursor sits on our choice
   sleepMs(700);
   const sc = hc(board, ['read', name], { json: false, allowFail: true }) || '';
-  if (keys.length === 1 && /^\d+$/.test(keys[0]) && new RegExp(`^\\s*[❯>›]\\s*${keys[0]}\\.`, 'm').test(sc)) hc(board, ['keys', name, 'enter'], { json: false, allowFail: true });
-  if (watch()) { console.log(`${id}: delivered`); return; }
+  // only while the same prompt is still up: otherwise Enter would accept the default of the NEXT prompt, unseen
+  const sameScreen = sc.includes((p.text.split('\n')[0] || '').trim());
+  if (sameScreen && keys.length === 1 && /^\d+$/.test(keys[0]) && new RegExp(`^\\s*[❯>›]\\s*${keys[0]}\\.`, 'm').test(sc)) hc(board, ['keys', name, 'enter'], { json: false, allowFail: true });
+  if (watch()) { writePromptState(board, id, { sig: p.sig, choice, sent: true, done: true, at: Date.now() }); console.log(`${id}: delivered`); return; }
   die(`${id}: sent ${choice} but the prompt is still showing. Retry checks again without sending twice`);
 }
 
@@ -420,6 +426,7 @@ function cmdLs(board, args) {
   const cards = allCards(board).map(c => {
     const d = display(c, live);
     const repo = board.repos[c.meta.repo] || {};
+    if (!d.note.startsWith('waiting on a prompt') && live[termName(c.id)]?.status !== 'blocked') clearPromptState(board, c.id);   // that prompt is gone: its "already sent" must not block the next one
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note,
@@ -429,7 +436,7 @@ function cmdLs(board, args) {
         ? { model: c.meta.proposed_model, effort: c.meta.proposed_effort, order: Number(c.meta.proposed_order) || 99, note: c.meta.plan_note || '' }
         : null,
       where: whereOf(c), questions: questionsOf(c),
-      prompt: d.note.startsWith('waiting on a prompt') ? promptOf(board, c, live) : null,
+      prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
       terminal: live[termName(c.id)] ? termName(c.id) : '',
       address: live[termName(c.id)]?.address || '',
       agent: live[termName(c.id)]?.status || '',
