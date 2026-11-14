@@ -40,7 +40,7 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
 ## Validate the change (cards that change herdr-board or herdr-app)
 
 - Check the change in two places, not just here: locally AND over the fake SSH machine (a second sshd on this PC,
-  files in `C:/Users/romai/fake-server/`). One command does both and prints PASS or FAIL for each side; run it
+  files in `~/fake-server/`). One command does both and prints PASS or FAIL for each side; run it
   from your worktree, after your last code change and before `done`:
   `{{check}}`
   It runs `node tests/run.mjs` (else `npm test`) here, then the same command through the fake machine. If the repo

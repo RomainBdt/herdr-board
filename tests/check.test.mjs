@@ -21,10 +21,11 @@ const check = (args, ssh) => {
   const r = spawnSync(process.execPath, [CHECK, '--dir', dir, ...args], { env, encoding: 'utf8' });
   return { code: r.status, out: r.stdout + r.stderr };
 };
-const OK = '--cmd "node -e 0"', BAD = '--cmd "node -e process.exit(3)"';
+const OK = '--cmd:node -e 0', BAD = '--cmd:node -e "process.exit(3)"';   // a command that passes, one that fails
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
 
-function run(args, ssh) { return check(args.flatMap(a => a.startsWith('--cmd') ? ['--cmd', a.slice(6).replace(/^"|"$/g, '')] : [a]), ssh); }
+// "--cmd:<command>" stands for the two arguments --cmd and <command>.
+function run(args, ssh) { return check(args.flatMap(a => a.startsWith('--cmd:') ? ['--cmd', a.slice(6)] : [a]), ssh); }
 
 test('both sides pass: PASS twice, exit 0', () => {
   const r = run([OK], stub(0, 'remote ran'));

@@ -20,7 +20,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, connect } from 'node:net';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const WIN = process.platform === 'win32';
@@ -56,7 +56,7 @@ const tail = (s, n = 25) => s.trim().split(/\r?\n/).slice(-n).join('\n');
 // Runs a program; returns { ok, ms, output }. Never opens a window.
 function run(file, args, opts = {}) {
   const t0 = Date.now();
-  const r = spawnSync(file, args, { encoding: 'utf8', windowsHide: true, timeout: TIMEOUT_MS, ...opts });
+  const r = spawnSync(file, args, { encoding: 'utf8', windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024, ...opts });
   const output = `${r.stdout || ''}${r.stderr || ''}${r.error ? `\n${r.error.message}` : ''}`;
   return { ok: r.status === 0 && !r.error, ms: Date.now() - t0, output };
 }
@@ -87,7 +87,9 @@ async function startFakeSshd() {
   const fake = slash(process.env.HERDR_FAKE_SERVER || join(homedir(), 'fake-server'));
   const cfg = `${fake}/sshd_config`, key = `${fake}/id_fake`;
   for (const f of [cfg, key]) if (!existsSync(f)) throw new Error(`fake SSH machine not set up: ${f} is missing`);
-  const sshd = WIN ? slash(join(process.env.SystemRoot || 'C:/Windows', 'System32/OpenSSH/sshd.exe')) : 'sshd';
+  // sshd refuses to start unless it is run by absolute path (it re-executes itself), so a bare `sshd` does not work off Windows.
+  const sshd = WIN ? slash(join(process.env.SystemRoot || 'C:/Windows', 'System32/OpenSSH/sshd.exe'))
+    : ['/usr/sbin/sshd', '/usr/local/sbin/sshd', '/sbin/sshd', '/opt/homebrew/sbin/sshd'].find(existsSync) || 'sshd';
   const work = slash(mkdtempSync(join(tmpdir(), 'herdr-check-sshd-')));
   const port = await freePort();
   const log = `${work}/sshd.log`;
@@ -95,7 +97,7 @@ async function startFakeSshd() {
   const child = spawn(sshd, ['-f', cfg, '-E', log, '-D', '-o', `Port=${port}`, '-o', `PidFile=${work}/sshd.pid`],
     { stdio: 'ignore', windowsHide: true });
   let died = null;
-  child.once('exit', c => { died = c; });
+  child.once('exit', (c, sig) => { died = c ?? sig ?? 'exited'; });
   child.once('error', e => { died = e.message; });
   const stop = () => {
     if (child.pid && died === null) {
@@ -134,7 +136,7 @@ async function remoteCheck(dir, cmd) {
     // -F none: no ~/.ssh/config, so no alias and nothing for Herdr to pick up. -T: no terminal.
     const args = ['-F', 'none', '-T', '-o', 'BatchMode=yes', '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=10', '-o', 'IdentitiesOnly=yes',
       '-o', 'StrictHostKeyChecking=no', '-o', `UserKnownHostsFile=${box.known}`,
-      '-p', String(box.port), '-i', box.key, `${process.env.USERNAME || process.env.USER}@127.0.0.1`, remote];
+      '-p', String(box.port), '-i', box.key, `${userInfo().username}@127.0.0.1`, remote];
     return run(sshExe, args);
   } finally {
     box.stop();
