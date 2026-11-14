@@ -225,7 +225,8 @@ function clip(text) {
   if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
   return '…' + tail.trimStart();
 }
-function lastMessageFromTranscript(worktree) {
+// ls runs often: the answer is kept per card in <board>/.last-message and reused while the transcript is unchanged.
+function lastMessageFromTranscript(worktree, cacheFile) {
   const dir = join(homedir(), '.claude', 'projects', String(worktree).replace(/[^A-Za-z0-9]/g, '-'));
   let newest = null;
   for (const f of readdirSync(dir)) {
@@ -234,6 +235,13 @@ function lastMessageFromTranscript(worktree) {
     if (!newest || st.mtimeMs > newest.mtime) newest = { path: join(dir, f), mtime: st.mtimeMs, size: st.size };
   }
   if (!newest) return '';
+  const key = `${newest.path}|${newest.mtime}|${newest.size}`;
+  if (cacheFile) { try { const c = JSON.parse(readFileSync(cacheFile, 'utf8')); if (c.key === key) return c.text; } catch { /* no cache yet */ } }
+  const text = tailMessage(newest);
+  if (cacheFile) { try { mkdirSync(dirname(cacheFile), { recursive: true }); writeAtomic(cacheFile, JSON.stringify({ key, text })); } catch { /* cache is optional */ } }
+  return text;
+}
+function tailMessage(newest) {
   // read the tail, growing it until an assistant text turns up (a long tool result can fill the first chunk)
   const fd = openSync(newest.path, 'r');
   try {
@@ -255,7 +263,7 @@ function lastMessageFromTranscript(worktree) {
 }
 function lastMessageOf(board, card) {
   try {
-    if (card.meta.worktree && existsSync(card.meta.worktree)) { const m = lastMessageFromTranscript(card.meta.worktree); if (m) return m; }
+    if (card.meta.worktree && existsSync(card.meta.worktree)) { const m = lastMessageFromTranscript(card.meta.worktree, join(board.dir, '.last-message', `${card.id}.json`)); if (m) return m; }
   } catch { /* no transcript here (e.g. remote machine): try the terminal */ }
   const screen = hc(board, ['read', termName(card.id)], { json: false, allowFail: true }) || '';
   const lines = screen.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^[─━═\s>❯│╭╰╮╯]*$/.test(l) && !/\? for shortcuts|shift\+tab|esc to interrupt|auto mode|accept edits/i.test(l));
@@ -508,7 +516,7 @@ function cmdLs(board, args) {
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
-      done: c.meta.done || '', outcome: c.meta.status === 'done' ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
+      done: c.meta.done || '', outcome: ['done', 'archived'].includes(c.meta.status) ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
       approved: c.meta.approved === 'true',
       where: whereOf(c), questions: questionsOf(c),
       prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
@@ -539,9 +547,16 @@ function cmdLs(board, args) {
   }
 }
 
+// A late command from an agent must not revive a cleaned card.
+function loadLive(board, id) {
+  const card = loadCard(board, id);
+  if (card.meta.status === 'archived') die(`${card.id} is archived: nothing to change`);
+  return card;
+}
+
 function cmdWhere(board, [id, goal, done, next]) {
   if (!id || next === undefined) die('usage: where <id> "<goal>" "<done>" "<next>"');
-  const card = loadCard(board, id);
+  const card = loadLive(board, id);
   setSection(card, 'Where we are', `- Goal: ${goal}\n- Done: ${done}\n- Next: ${next}`);
   card.meta.updated = now();
   saveCard(card);
@@ -550,7 +565,7 @@ function cmdWhere(board, [id, goal, done, next]) {
 
 function cmdAsk(board, [id, ...qs]) {
   if (!id || !qs.length) die('usage: ask <id> "<question 1>" ["<question 2>" ...]');
-  const card = loadCard(board, id);
+  const card = loadLive(board, id);
   // an earlier round of questions and answers moves to History, so the card shows only the open ones
   const oldQ = section(card, 'Questions')?.body || '';
   if (oldQ.trim()) {
@@ -573,7 +588,7 @@ function cmdAnswer(board, args) {
   let [id, ...text] = args;
   if (uri !== undefined) text = [decodeURIComponent(uri)];
   if (!id) die('usage: answer <id> ["<answer text>"]   (or write them in the card under ## Answers first)');
-  const card = loadCard(board, id);
+  const card = loadLive(board, id);
   if (text.length) {
     const prev = answersOf(card);
     setSection(card, 'Answers', `${prev}\n\n_${now()}_\n${text.join(' ')}`.trim());
@@ -605,7 +620,7 @@ function cmdDone(board, args) {
   const [id, ...summary] = args;
   if (!id || !summary.length) die(`usage: done <id> [--state ${OUTCOMES.join('|')}] [--pr <url>] "<summary>"`);
   if (!OUTCOMES.includes(state)) die(`--state must be one of ${OUTCOMES.join(', ')}`);
-  const card = loadCard(board, id);
+  const card = loadLive(board, id);
   card.meta.outcome = state;
   setSection(card, 'Result', `_${now()}_\n\n${summary.join(' ')}${pr ? `\n\nPull request: ${pr}` : ''}`);
   delete card.meta.reopened_outcome;   // an explicit `done` replaces the outcome remembered by a reopen
@@ -631,6 +646,7 @@ function cmdApprove(board, args) {
   if (!MODELS.includes(card.meta.model)) die(`model must be one of ${MODELS.join(', ')}`);
   if (!EFFORTS.includes(card.meta.effort)) die(`effort must be one of ${EFFORTS.join(', ')}`);
   card.meta.approved = 'true';
+  delete card.meta.start_error;   // approving again is the "try again"
   if ((card.meta.status || 'todo') === 'todo') card.meta.status = 'ready';
   saveCard(card);
   console.log(`${card.id}: ready (${card.meta.model}/${card.meta.effort})`);
@@ -652,6 +668,7 @@ function cmdUnapprove(board, args) {
 // Cards that may start, best first: ready ones, and todo ones pre-approved on the card.
 function queue(board) {
   return allCards(board)
+    .filter(c => !c.meta.start_error)   // a card that failed to start waits for a person (approve or start clears it), not the next tick
     .filter(c => c.meta.status === 'ready' || ((c.meta.status || 'todo') === 'todo' && c.meta.approved === 'true'))
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
@@ -699,9 +716,19 @@ function cmdTick(board) {
   try { last = Number(readFileSync(file, 'utf8')) || 0; } catch {}
   if (last > Date.now()) last = 0;   // clock moved back
   if (Date.now() - last < board.autoStart.intervalMinutes * 60000) return;
-  writeAtomic(file, String(Date.now()));   // first: a failure below must not make it retry every 30 s
-  try { startNext(board, { quiet: true }); }
-  catch (e) { console.log(`auto-start failed: ${e.message}`); }   // the timer goes on
+  // two panels may tick together: only the one that creates the lock file runs; a lock older than a minute is a crash's leftover
+  const lock = file + '.lock';
+  try { if (Date.now() - statSync(lock).mtimeMs > 60000) unlinkSync(lock); } catch { /* no lock */ }
+  let fd;
+  try { fd = openSync(lock, 'wx'); } catch { return; }   // the other panel has it
+  try {
+    let again = 0;
+    try { again = Number(readFileSync(file, 'utf8')) || 0; } catch {}
+    if (Date.now() - again < board.autoStart.intervalMinutes * 60000 && again <= Date.now()) return;   // the other panel just ran
+    writeAtomic(file, String(Date.now()));   // first: a failure below must not make it retry every 30 s
+    try { startNext(board, { quiet: true }); }
+    catch (e) { console.log(`auto-start failed: ${e.message}`); }   // the timer goes on
+  } finally { closeSync(fd); try { unlinkSync(lock); } catch {} }
 }
 
 function git(args, opts = {}) {
@@ -975,9 +1002,13 @@ function retryBusy(fn) {
 
 // Clean: always stops the agent; then, as the board's "clean" settings say (config cleanWorktree|cleanBranch|cleanArchive):
 // removes the worktree, deletes the branch, moves the card to archived.
-function cmdClean(board, [id]) {
-  if (!id) die('usage: clean <id>   (stops its agent; removes the worktree, deletes the branch and archives the card as the board settings say)');
+function cmdClean(board, args) {
+  const force = args.includes('--force');
+  if (force) args.splice(args.indexOf('--force'), 1);
+  const [id] = args;
+  if (!id) die('usage: clean <id> [--force]   (stops its agent; removes the worktree, deletes the branch and archives the card as the board settings say)');
   const card = loadCard(board, id);
+  if (card.meta.status !== 'done' && !force) die(`${card.id} is ${card.meta.status || 'todo'}: only a done card can be cleaned (--force to clean it anyway)`);
   const opt = board.clean;
   const name = termName(card.id);
   const repo = board.repos[card.meta.repo];

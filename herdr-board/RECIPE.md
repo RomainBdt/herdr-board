@@ -31,7 +31,7 @@ tabs, `board-top`) with:
   an answer box. **+** opens a New card dialog (repo, title, context, constraints, done target).
 - Cards that start needing you give a toast and a sound (setting `notifyNeeds`); the count is shared with the tab bar through
   `shared("herdr-board.needs")`.
-- Settings are kept in `shared("herdr-board.settings")`: position (side | top), click, compact, showDone, showArchived,
+- Settings are kept in `shared("herdr-board.settings")`: position (side | top), click, compact, showDone, showArchived (default off),
   refresh, boards `[{machine, script, board}]`. Until a board is set, the panel asks for it in ⚙ → Boards.
 - Without a board configured, the panel shows no cards and a hint, never an error.
 
