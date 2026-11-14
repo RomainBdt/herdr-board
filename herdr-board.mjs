@@ -9,7 +9,7 @@
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync, rmdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -703,9 +703,22 @@ function cmdClean(board, [id]) {
   hc(board, ['kill', name], { json: false, allowFail: true });
   hc(board, ['rm', name], { json: false, allowFail: true });
   if (opt.worktree && card.meta.worktree && existsSync(card.meta.worktree)) {
-    try { git(['-C', repo.path, 'worktree', 'remove', card.meta.worktree]); }
-    catch (e) { die(`${card.id}: worktree has uncommitted changes, left in place: ${card.meta.worktree}`); }
-    did.push('worktree removed');
+    try { git(['-C', repo.path, 'worktree', 'remove', card.meta.worktree]); did.push('worktree removed'); }
+    catch (e) {
+      const why = String(e.stderr || e.message).trim().split('\n')[0];
+      if (/is not a working tree/.test(why)) {
+        // git no longer knows this folder (a leftover): remove it only when empty, else leave it and say so
+        let left = [];
+        try { left = readdirSync(card.meta.worktree); } catch { /* unreadable */ }
+        if (left.length) die(`${card.id}: ${card.meta.worktree} is not a git worktree but has ${left.length} file(s) (${left.slice(0, 5).join(', ')}); left in place`);
+        try { rmdirSync(card.meta.worktree); did.push('empty leftover worktree folder removed'); }
+        catch (e2) { die(`${card.id}: could not remove empty folder ${card.meta.worktree}: ${e2.message}`); }
+      } else {
+        let files = '';
+        try { files = git(['-C', card.meta.worktree, 'status', '--porcelain']).split('\n').filter(Boolean).slice(0, 8).join('; '); } catch { /* none */ }
+        die(`${card.id}: worktree not removed, left in place (${card.meta.worktree}). ${files ? `Changes: ${files}. ` : ''}Git said: ${why}`);
+      }
+    }
   }
   let note = '';
   if (opt.branch && repo) {

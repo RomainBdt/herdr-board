@@ -275,7 +275,7 @@ export default class HerdrBoard extends View {
     cx.spawn(async (cx) => {
       const r = await cli(conn, args, timeout);
       end();
-      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed`, body: r.err.slice(0, 300), level: "error" });
+      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed`, body: r.err.replace(/\s+/g, " ").slice(0, 700), level: "error" });
       this.refreshOne(cx, conn);
       cx.notify();
     });
@@ -294,7 +294,7 @@ export default class HerdrBoard extends View {
     let left = list.length;
     for (const b of list) cx.spawn(async (cx) => {
       const r = await cli(b.conn, args, timeout);
-      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed${all.length > 1 ? ` on ${b.label}` : ""}`, body: r.err.slice(0, 300), level: "error" });
+      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed${all.length > 1 ? ` on ${b.label}` : ""}`, body: r.err.replace(/\s+/g, " ").slice(0, 700), level: "error" });
       if (--left === 0) end();
       this.refreshOne(cx, b.conn);
       cx.notify();
