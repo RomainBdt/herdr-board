@@ -132,7 +132,7 @@ async function remoteCheck(dir, cmd) {
   try {
     const sshExe = WIN ? slash(join(process.env.SystemRoot || 'C:/Windows', 'System32/OpenSSH/ssh.exe')) : 'ssh';
     // -F none: no ~/.ssh/config, so no alias and nothing for Herdr to pick up. -T: no terminal.
-    const args = ['-F', 'none', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'IdentitiesOnly=yes',
+    const args = ['-F', 'none', '-T', '-o', 'BatchMode=yes', '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=10', '-o', 'IdentitiesOnly=yes',
       '-o', 'StrictHostKeyChecking=no', '-o', `UserKnownHostsFile=${box.known}`,
       '-p', String(box.port), '-i', box.key, `${process.env.USERNAME || process.env.USER}@127.0.0.1`, remote];
     return run(sshExe, args);
