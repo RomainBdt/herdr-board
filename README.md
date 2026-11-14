@@ -104,6 +104,7 @@ kept in `<board>/.auto-start`. There is no quiet-hours or machine-busy condition
 ## Trying it on one computer
 
 You don't need a second machine: leave **Machine** empty in the settings and the board runs on this computer.
+Skip `deploy.sh` then: set **Board CLI** to the `herdr-board.mjs` in this checkout.
 
 ## The board panel (Herdr, on the laptop)
 

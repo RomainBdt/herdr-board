@@ -34,7 +34,6 @@ const DEFAULTS = {
 };
 // One short line for the header, from whatever the CLI or node printed.
 function explain(err, c) {
-  if (!c.script || !c.board) return "Not set up yet: set the machine and the paths in ⚙ → Boards.";
   if (/Cannot find module/.test(err)) return `No board CLI at ${c.script}. Check ⚙ → Boards.`;
   if (/no board\.json/.test(err)) return `No board.json in ${c.board}. Check ⚙ → Boards.`;
   if (/not recognized|ENOENT|command not found/.test(err)) return "Node isn't installed (or not on the PATH) on that machine.";
