@@ -1,6 +1,6 @@
 # herdr-board
 
-A small kanban of Claude Code agents for [Herdr](https://herdr.dev). Each card is a Markdown file. Each running card is
+A small kanban of Claude Code agents for Herdr. Each card is a Markdown file. Each running card is
 a normal, interactive Claude Code session (a named `hc` terminal) in its own git worktree, on the machine that holds
 the repos. You can open any card's session in Herdr and type into it at any time.
 
