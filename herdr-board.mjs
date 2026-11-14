@@ -497,7 +497,7 @@ function startCard(board, card) {
     }
   }
 
-  allowShipCommands(wt);
+  allowShipCommands(wt, card);
 
   const rules = renderRules(board, card);
   const brief = `You are the agent for card ${card.id} ("${card.meta.title}"). Read your card first: ${slash(card.path)}. Then work it to its "done" target, following your card rules.`;
@@ -523,16 +523,19 @@ function startCard(board, card) {
 
 // Claude Code can't scope a permission to a folder, so each card worktree gets its own untracked
 // .claude/settings.local.json allowing what /ship needs (merged into any existing file).
-const SHIP_ALLOW = ['Bash(gh pr merge:*)', 'Bash(gh pr create:*)', 'Bash(gh pr edit:*)', 'Bash(gh pr checks:*)',
+const SHIP_ALLOW = ['Bash(gh pr create:*)', 'Bash(gh pr edit:*)', 'Bash(gh pr checks:*)',
   'Bash(gh issue create:*)', 'Bash(gh label create:*)', 'Bash(git push:*)'];
-function allowShipCommands(wt) {
+// gh pr merge is allowed only when the card's done target is "merged".
+function allowShipCommands(wt, card) {
+  const merges = (card.meta.done || '').split('#')[0].trim() === 'merged';
+  const wanted = merges ? ['Bash(gh pr merge:*)', ...SHIP_ALLOW] : SHIP_ALLOW;
   try {
     const file = join(wt, '.claude', 'settings.local.json');
     let cfg = {};
     if (existsSync(file)) cfg = JSON.parse(readFileSync(file, 'utf8'));   // unreadable: throws, file left alone
     cfg.permissions = cfg.permissions || {};
     const allow = Array.isArray(cfg.permissions.allow) ? cfg.permissions.allow : [];
-    const missing = SHIP_ALLOW.filter(r => !allow.includes(r));
+    const missing = wanted.filter(r => !allow.includes(r));
     if (missing.length) {
       cfg.permissions.allow = [...allow, ...missing];
       mkdirSync(dirname(file), { recursive: true });
