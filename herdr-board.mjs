@@ -516,7 +516,7 @@ function cmdLs(board, args) {
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
-      done: c.meta.done || '', outcome: ['done', 'archived'].includes(c.meta.status) ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
+      done: c.meta.done || '', outcome: ['done', 'archived'].includes(c.meta.status) ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '', autoChoice: c.meta.auto_choice || '',
       approved: c.meta.approved === 'true',
       where: whereOf(c), questions: questionsOf(c),
       prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
@@ -635,14 +635,43 @@ function cmdDone(board, args) {
   startNext(board, { quiet: true });
 }
 
+// Auto model or effort (empty on the card): one-shot Haiku call reads the card and picks. A manual value is never touched.
+// The reason (or the fallback note) goes in the card as `auto_choice`. Any failure falls back to sonnet / medium.
+function chooseAuto(board, card) {
+  const needModel = !card.meta.model, needEffort = !card.meta.effort;
+  if (!needModel && !needEffort) return;
+  const text = ['Context', 'Constraints', 'Done looks like'].map(t => '## ' + t + '\n' + (section(card, t)?.body || '(empty)')).join('\n\n');
+  const prompt = 'You choose the Claude model and reasoning effort for a coding agent that will work this task card.\n' +
+    'Models: haiku (trivial, mechanical), sonnet (normal work), opus (hard, risky or large work). Efforts: low, medium, high, xhigh.\n' +
+    'Card: ' + (card.meta.title || '') + '\nDone target: ' + (card.meta.done || 'none') + '\n\n' + text + '\n\n' +
+    'Answer with ONLY one JSON object: {"model":"haiku|sonnet|opus","effort":"low|medium|high|xhigh","reason":"one short line"}';
+  let model = 'sonnet', effort = 'medium', note = '';
+  try {
+    const r = spawnSync('claude', ['-p', '--model', 'haiku'], { input: prompt, encoding: 'utf8', timeout: 90000, shell: process.platform === 'win32' });
+    if (r.error || r.status !== 0) throw new Error(r.error?.message || String(r.stderr || 'exit ' + r.status).trim().split('\n')[0]);
+    const m = r.stdout.match(/\{[\s\S]*\}/);
+    const j = JSON.parse(m ? m[0] : '');
+    if (!MODELS.includes(j.model) || !['low', 'medium', 'high', 'xhigh'].includes(j.effort)) throw new Error('unusable answer');
+    model = j.model; effort = j.effort;
+    note = 'Haiku chose ' + [needModel && model, needEffort && effort].filter(Boolean).join('/') + ': ' + String(j.reason || 'no reason given').replace(/\s+/g, ' ').trim().slice(0, 200);
+  } catch (e) {
+    note = 'Haiku choice failed (' + String(e.message).replace(/\s+/g, ' ').slice(0, 120) + '): fell back to sonnet/medium';
+  }
+  if (needModel) card.meta.model = model;
+  if (needEffort) card.meta.effort = effort;
+  card.meta.auto_choice = note;
+}
+
 function cmdApprove(board, args) {
   const model = takeFlag(args, '--model');
   const effort = takeFlag(args, '--effort');
   const [id] = args;
   if (!id) die('usage: approve <id> [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]');
   const card = loadCard(board, id);
-  card.meta.model = model || card.meta.model || 'sonnet';
-  card.meta.effort = effort || card.meta.effort || 'medium';
+  if (model) card.meta.model = model;
+  if (effort) card.meta.effort = effort;
+  if (!MODELS.includes(card.meta.model || 'sonnet') || !EFFORTS.includes(card.meta.effort || 'medium')) die(`model must be one of ${MODELS.join(', ')}; effort one of ${EFFORTS.join(', ')}`);
+  chooseAuto(board, card);   // Auto model/effort: Haiku picks, with a reason
   if (!MODELS.includes(card.meta.model)) die(`model must be one of ${MODELS.join(', ')}`);
   if (!EFFORTS.includes(card.meta.effort)) die(`effort must be one of ${EFFORTS.join(', ')}`);
   card.meta.approved = 'true';
@@ -739,8 +768,9 @@ function gitWhy(e) { return String(e.stderr || e.message).trim().split('\n')[0];
 function startCard(board, card) {
   const repo = board.repos[card.meta.repo];
   if (!repo) die(`${card.id}: unknown repo "${card.meta.repo}"`);
-  const model = card.meta.model || 'sonnet';
-  const effort = card.meta.effort || 'medium';
+  chooseAuto(board, card);
+  const model = card.meta.model;
+  const effort = card.meta.effort;
   const name = termName(card.id);
   if (liveTerminals(board)[name]) die(`${card.id}: its agent (${name}) is already running`);
   hc(board, ['rm', name], { json: false, allowFail: true });   // a finished one with the same name

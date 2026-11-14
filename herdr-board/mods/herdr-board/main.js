@@ -354,8 +354,8 @@ export default class HerdrBoard extends View {
     const t = theme();
     const b = [];
     const id = c.id, u = c.uid, on = c.conn;
-    if (c.column === "todo") b.push(button(`ap-${u}`, c.model ? "Approve" : "Approve (sonnet)", (cx) => this.act(cx, `Approving ${id}…`, ["approve", id], undefined, on),
-      { tip: "Uses the card's model and effort, else sonnet / medium" }));
+    if (c.column === "todo") b.push(button(`ap-${u}`, "Approve", (cx) => this.act(cx, `Approving ${id}…`, ["approve", id], undefined, on),
+      { tip: "Uses the card's model and effort; for Auto, Haiku picks them now and says why on the card" }));
     if (c.column === "ready") b.push(button(`st-${u}`, "Start", (cx) => this.act(cx, `Starting ${id}…`, ["start", id], 90000, on)));
     if (c.column === "ready") b.push(button(`un-${u}`, "To do", (cx) => this.act(cx, `Moving ${id} back to To do…`, ["unapprove", id], undefined, on), { tone: t.muted, tip: "Not started yet: move it back to To do (not approved)" }));
     if (c.column === "needs-you" && c.questions.length && c.status === "needs-you")
@@ -383,7 +383,7 @@ export default class HerdrBoard extends View {
     const line = (icon, text, color, wrap) => !text ? null :
       h_flex().gap(5).min_w(0).text_size(11.5).text_color(color ?? t.muted)
         .child(div().flex_shrink_0().w(12).child(icon)).child(wrap ? div().min_w(0).flex_1().child(text) : div().min_w(0).truncate().child(text));
-    const model = `${c.model || "sonnet"} · ${c.effort || "medium"}`;
+    const model = `${c.model || "auto"} · ${c.effort || "auto"}`;
     const rows = [];
     const compact = S().compact && ["todo", "ready", "done", "archived"].includes(c.column);   // one line + buttons
     if (compact) {
@@ -430,6 +430,7 @@ export default class HerdrBoard extends View {
           .when(live, (el) => el.child(div().flex_shrink_0().text_size(11).text_color(t.working)
             .frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90))))
         .when(!compact, (el) => el.child(div().text_size(11).text_color(t.dim).truncate().child(`${c.repo} · ${model} · ${c.done}`)))
+        .when(!compact && Boolean(c.autoChoice), (el) => el.child(div().text_size(10.5).text_color(t.dim).truncate().child(c.autoChoice)))
         .children(rows.filter(Boolean))
         .child(h_flex().pt(3).gap(5).flex_wrap().children(this.cardButtons(c, cx))));
   }
@@ -1079,9 +1080,9 @@ export default class HerdrBoard extends View {
         .child(label("Finish with", "How far the agent takes it"))
         .child(this.grey(chip("done", FINISH_WITH,
           this.done, (v) => { this.done = v; })))
-        .child(label("Model", "Auto: sonnet"))
+        .child(label("Model", "Auto: Haiku picks on approve"))
         .child(this.grey(chip("model", [["", "Auto"], ["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], this.model, (v) => { this.model = v; })))
-        .child(label("Effort", "Auto: medium"))
+        .child(label("Effort", "Auto: Haiku picks on approve"))
         .child(this.grey(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; }))))
       .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
