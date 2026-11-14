@@ -11,10 +11,10 @@ const COLUMNS = [
   ["todo", "To do"], ["ready", "Ready"], ["running", "Running"], ["needs-you", "Needs you"], ["done", "Done"], ["archived", "Archived"],
 ];
 // the board's "done:" targets and their labels (the New card chips and the Done tag both use them)
-const FINISH_WITH = [["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]];
+const FINISH_WITH = [["none", "None"], ["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]];
 const REACHED = Object.fromEntries(FINISH_WITH);
 // one color per reached state, so the Done tags are told apart at a glance
-const REACHED_COLOR = { local: "#e5b92e", "local-reviewed": "#a6c93a", "draft-pr": "#5cc86a", "pr-ready": "#22b8a0", merged: "#15a34a" };
+const REACHED_COLOR = { none: "#9ca3af", local: "#e5b92e", "local-reviewed": "#a6c93a", "draft-pr": "#5cc86a", "pr-ready": "#22b8a0", merged: "#15a34a" };
 // the other tags: Done (target in plain words) blue, Blocked orange, Not reached red; none shares a color with another tag
 const TAG_COLOR = { done: "#7b93e0", blocked: "#f97316", missed: "#ef4444" };
 const BUMP ="herdr-board.bump";     // dialogs set it after a change so the board refreshes at once
