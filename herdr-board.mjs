@@ -979,7 +979,7 @@ function cmdConfig(board, [key, value]) {
   const raw = JSON.parse(readFileSync(file, 'utf8'));
   if (key === 'maxParallel') {
     const n = Number(value);
-    if (!Number.isInteger(n) || n < 1) die('maxParallel must be a whole number, 1 or more');
+    if (!Number.isSafeInteger(n) || n < 1) die('maxParallel must be a whole number, 1 or more');
     raw.maxParallel = n;
   } else if (key === 'autoStart') {
     if (!['on', 'off'].includes(value)) die('autoStart must be on or off');

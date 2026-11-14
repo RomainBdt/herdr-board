@@ -597,7 +597,7 @@ export default class HerdrBoard extends View {
   loadRow(cx, row) {
     const conn = this.rowConn(row);
     row.loaded = connKey(conn);
-    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); return; }
+    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); row.par.set_value(""); return; }
     cx.spawn(async (cx) => {
       const r = await cli(conn, ["ls", "--json"]);
       if (connKey(this.rowConn(row)) !== connKey(conn)) return;   // changed meanwhile
@@ -605,7 +605,7 @@ export default class HerdrBoard extends View {
         const d = JSON.parse(r.out);
         Object.assign(row, { maxParallel: d.maxParallel, autoStart: d.autoStart, clean: d.clean ?? null, name: d.board });
         row.par.set_value(d.maxParallel == null ? "" : String(d.maxParallel));
-      } catch { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); }
+      } catch { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); row.par.set_value(""); }
       cx.notify();
     });
   }
@@ -646,18 +646,23 @@ export default class HerdrBoard extends View {
   }
 
   setPar(cx, row, n) {
-    if (!Number.isInteger(n) || n < 1) n = row.maxParallel;   // not a number: back to what is saved
+    if (!Number.isSafeInteger(n) || n < 1) n = row.maxParallel;   // not a number: back to what is saved
     if (n == null) return;
     row.par.set_value(String(n));
-    if (n !== row.maxParallel) this.serverSetting(cx, row, "maxParallel", n);
+    if (n === row.maxParallel) return;
+    // taken at once, so a blur right after Enter, or a -/+ click right after typing, build on this value (not the old one)
+    const prev = row.maxParallel;
+    row.maxParallel = n;
+    this.serverSetting(cx, row, "maxParallel", n, prev);
   }
 
-  serverSetting(cx, row, key, value) {
+  serverSetting(cx, row, key, value, prev) {
     this.msg = "Saving…";
     cx.notify();
     cx.spawn(async (cx) => {
       const r = await cli(this.rowConn(row), ["config", key, String(value)]);
       // an older herdr-board.mjs does not know the newer settings and answers with its usage line
+      if (!r.ok && key === "maxParallel") { row.maxParallel = prev; row.par.set_value(prev == null ? "" : String(prev)); }   // not saved: show what is saved
       this.msg = r.ok ? "" : /usage: config/.test(r.err) ? `Out of date: this board's herdr-board.mjs cannot save "${key}". Run ./deploy.sh again.` : r.err;
       if (r.ok) {
         if (key === "autoStart") row.autoStart = { ...row.autoStart, enabled: value === "on" };
