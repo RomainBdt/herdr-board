@@ -1,6 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
 import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, nextCommand } from "herdr";
+// Modified from the "tabs" mod shipped with Herdr (Apache License 2.0, see NOTICE): a Board button was added.
 
 // herdr-board: a copy of Herdr's tab bar ("tabs") with a Board button beside Files and Changes.
 // The board sits in the layout node the board's Position setting picks; the button shows or hides it,

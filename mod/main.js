@@ -30,11 +30,10 @@ const DEFAULTS = {
   notifyDone: false,                 // Herdr already says when an agent finishes
   // boards: [{machine, script, board}]: every board the panel shows at once (machine "" = this computer).
   // Older settings had one connection in machine/script/board; conns() reads those when boards is absent.
-  machine: "server", script: "C:/fake-server/herdr-board/herdr-board.mjs", board: "C:/fake-server/board",
+  machine: "", script: "", board: "",   // empty until set in ⚙ → Boards
 };
 // One short line for the header, from whatever the CLI or node printed.
 function explain(err, c) {
-  if (!c.script || !c.board) return "Not set up yet: set the machine and the paths in ⚙ → Boards.";
   if (/Cannot find module/.test(err)) return `No board CLI at ${c.script}. Check ⚙ → Boards.`;
   if (/no board\.json/.test(err)) return `No board.json in ${c.board}. Check ⚙ → Boards.`;
   if (/not recognized|ENOENT|command not found/.test(err)) return "Node isn't installed (or not on the PATH) on that machine.";
@@ -62,6 +61,8 @@ function conns() {
   const list = stored();
   return list.filter((c, i) => list.findIndex((o) => connKey(o) === connKey(c)) === i);   // the same board twice: once
 }
+// The panel can't read anything until a board has both its CLI path and its folder.
+function configured() { return conns().some((c) => c.script && c.board); }
 function connKey(c) { return `${c.machine || ""}|${c.script}|${c.board}`; }
 function machineName(c) { return c.machine || "This computer"; }
 // A card id is unique on its own board only: the same repo on two machines gives two HB-4.
@@ -191,6 +192,7 @@ export default class HerdrBoard extends View {
   refresh(cx) { for (const c of conns()) this.refreshOne(cx, c); }
 
   refreshOne(cx, conn) {
+    if (!conn.script || !conn.board) return;   // not set up yet: nothing to read
     const k = connKey(conn);
     const src = (this.srcs[k] ??= { data: null, error: "", loading: false, last: 0, seen: false });
     if (src.loading) { src.again = true; return; }   // read again once this one ends: it may predate an action
@@ -443,7 +445,16 @@ export default class HerdrBoard extends View {
 
     return v_flex().id("board").size_full().bg(t.chrome).text_color(t.foreground)
       .child(header)
-      .child(h_flex().flex_1().min_h(0).p(8).gap(8).children(COLUMNS.filter(([k]) => k !== "done" || S().showDone).map(column)));
+      .child(!configured() ? this.emptyState()
+        : h_flex().flex_1().min_h(0).p(8).gap(8).children(COLUMNS.filter(([k]) => k !== "done" || S().showDone).map(column)));
+  }
+
+  // Shown instead of the columns until a board is set up.
+  emptyState() {
+    const t = theme();
+    return v_flex().id("unconfigured").flex_1().min_h(0).items_center().justify_center().gap(10).p(16)
+      .child(div().text_size(12.5).text_color(t.muted).child("Set the machine and the paths in ⚙ → Boards"))
+      .child(button("b-conn", "Open settings", () => this.openSettings(), { primary: true }));
   }
 
   cards() { return this.allCards().filter((c) => c.column !== "done" || S().showDone); }
@@ -452,7 +463,7 @@ export default class HerdrBoard extends View {
   heading() { const b = this.boards(); return b.length === 1 ? b[0].data?.board || "Board" : "Boards"; }
   runningText() {
     const b = this.boards();
-    if (b.length === 1) return b[0].data ? `${b[0].data.running}/${b[0].data.maxParallel} running` : "loading…";
+    if (b.length === 1) return b[0].data ? `${b[0].data.running}/${b[0].data.maxParallel} running` : configured() ? "loading…" : "";
     return b.map((x) => `${x.label} ${x.data ? `${x.data.running}/${x.data.maxParallel}` : "…"}`).join(" · ");
   }
   errors() {
@@ -515,7 +526,7 @@ export default class HerdrBoard extends View {
 
     return v_flex().id("board").size_full().bg(t.chrome).text_color(t.foreground)
       .child(header)
-      .child(v_flex().id("sections").flex_1().min_h(0).px(8).py(8).gap(8).overflow_y_scrollbar()
+      .child(!configured() ? this.emptyState() : v_flex().id("sections").flex_1().min_h(0).px(8).py(8).gap(8).overflow_y_scrollbar()
         .children(order.map(section)));
   }
 

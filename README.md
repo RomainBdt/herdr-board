@@ -1,8 +1,29 @@
 # herdr-board
 
-A small kanban of Claude Code agents for Herdr. Each card is a Markdown file. Each running card is a normal,
-interactive Claude Code session (a named `hc` terminal) in its own git worktree, on the machine that holds the repos.
-You can open any card's session in Herdr and type into it at any time.
+A small kanban of Claude Code agents for Herdr. Each card is a Markdown file. Each running card is
+a normal, interactive Claude Code session (a named `hc` terminal) in its own git worktree, on the machine that holds
+the repos. You can open any card's session in Herdr and type into it at any time.
+
+## What you need
+
+- The Herdr app and herdr-core (`hc` on your PATH), on the computer you work at and on the machine with the repos
+  (they can be the same computer).
+- Node 18+, git and Claude Code on the machine with the repos.
+- `gh` (GitHub CLI), logged in, if you use the pull-request done targets.
+
+## Install
+
+1. **Where the repos are ("the server")**: create a board folder with a `board.json` (see below), then
+   `./deploy.sh <machine> <folder>` copies the CLI there (`<machine>` is a name from `hc machine ls`).
+2. **Where you work (the laptop)**: `./install.sh` installs the panel and the layout into Herdr. Pick the layout
+   with `Ctrl+Shift+L`, open ⚙ → Boards and set the machine, the path of `herdr-board.mjs` and the board folder.
+
+## Daily use
+
+Click **+** to make a card, fill in Context / Constraints / Done looks like, **Plan**, approve, **Start next**.
+Cards that need you move to **Needs you**: answer there. The command line does the same (see Commands).
+
+## Layout on the server
 
 ```
 board/                       on the server
@@ -53,7 +74,7 @@ shows under **needs-you** with the reason.
 {
   "name": "Payments",
   "space": "<Herdr space id on that machine: agents show up there as tabs>",
-  "hcSession": "<only for a test core; leave out on a real server>",
+  "hcSession": "<only for a separate test core; leave out normally>",
   "maxParallel": 3,
   "permissionMode": "auto",
   "plannerModel": "sonnet",
@@ -80,35 +101,10 @@ kept in `<board>/.auto-start`. There is no quiet-hours or machine-busy condition
 - A new worktree opens on Claude's "trust this folder?" prompt; `start` answers yes.
 - A new card branches from `origin/<base>` after a fetch when the repo has an `origin`, else from the local base.
 
-## Testing on one laptop (fake server)
+## Trying it on one computer
 
-A user-level OpenSSH server on the laptop (no admin, no service), in `~/fake-server`:
-
-```sh
-mkdir -p ~/fake-server && cd ~/fake-server
-ssh-keygen -q -t ed25519 -N "" -f id_fake && ssh-keygen -q -t ed25519 -N "" -f hostkey && cp id_fake.pub authorized_keys
-cat > sshd_config <<EOF
-Port 2222
-ListenAddress 127.0.0.1
-HostKey C:/Users/<you>/fake-server/hostkey
-PasswordAuthentication no
-AuthorizedKeysFile C:/Users/<you>/fake-server/authorized_keys
-StrictModes no
-EOF
-/c/Windows/System32/OpenSSH/sshd.exe -f C:/Users/<you>/fake-server/sshd_config -D &   # again after each reboot
-```
-
-Add to `~/.ssh/config`: `Host fakeserver` / `HostName 127.0.0.1` / `Port 2222` / `IdentityFile ~/fake-server/id_fake`.
-Then:
-
-```sh
-hc machine add fakeserver --name fakeserver --session fakeserver
-HC_SESSION=fakeserver hc server start
-git init ~/fake-server/fake-project          # the fake project (commit something in it)
-hc run --on fakeserver --bg --no-parent --outlive-parent --name fake-project --cwd ~/fake-server/fake-project --keep
-```
-
-The machine and its `fake-project` terminal then show up in Herdr. Stop: `hc machine rm fakeserver` and end `sshd.exe`.
+You don't need a second machine: leave **Machine** empty in the settings and the board runs on this computer.
+Skip `deploy.sh` then: set **Board CLI** to the `herdr-board.mjs` in this checkout.
 
 ## The board panel (Herdr, on the laptop)
 
@@ -158,3 +154,8 @@ with `./deploy.sh` (or point the local board at this checkout).
 - **+**, **Plan**, **▶ Start next** in the header. Each card's tab is named after the card.
 - Commands for `keys.json`: `herdr-board.answer` (first card with questions), `herdr-board.jump` (its session),
   `herdr-board.settings`, `herdr-board.refresh`, `herdr-board-tabs.toggle`.
+
+## Licenses and notices
+
+herdr-board is under the license in `LICENSE`. `mod-tabs/` is a modified copy of the `tabs` mod shipped with Herdr,
+which is under the Apache License 2.0; see `NOTICE`.

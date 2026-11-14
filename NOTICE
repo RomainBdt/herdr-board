@@ -1,0 +1,11 @@
+herdr-board
+Copyright 2026 RomainBdt
+
+mod-tabs/ is a modified copy of the "tabs" mod shipped with the Herdr app, which is
+licensed under the Apache License, Version 2.0 (the license text is in LICENSE, and
+also ships with the Herdr app, in its LICENSE file). Herdr's copy names no copyright
+holder.
+
+Changes made to the original: a "Board" button next to Files and Changes that shows
+or hides the herdr-board panel, with a count of cards that need you. The mod is
+renamed herdr-board-tabs. Everything else is Herdr's original code.
