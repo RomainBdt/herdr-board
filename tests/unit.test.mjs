@@ -239,6 +239,7 @@ describe('rules.md: unfixed review findings', () => {
     assert.match(sec, /PR note/);
     assert.match(sec, /`done` summary/);
     assert.match(sec, /no remote/);
+    assert.match(readFileSync(join(ROOT, 'herdr-board.mjs'), 'utf8'), /Bash[(]gh issue list:[*][)]/);   // agents may run the dedup search
   });
   test('local-reviewed points to it', () => {
     const lr = rules.split(/\r?\n- `/).find(l => l.startsWith('local-reviewed`'));

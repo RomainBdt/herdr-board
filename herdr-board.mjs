@@ -840,7 +840,7 @@ function startCard(board, card) {
 // .claude/settings.local.json allowing what /ship needs and denying gh pr merge unless the card merges
 // (merged into any existing file).
 const SHIP_ALLOW = ['Bash(gh pr create:*)', 'Bash(gh pr edit:*)', 'Bash(gh pr checks:*)',
-  'Bash(gh issue create:*)', 'Bash(gh label create:*)', 'Bash(git push:*)'];
+  'Bash(gh issue create:*)', 'Bash(gh issue list:*)', 'Bash(gh label create:*)', 'Bash(git push:*)'];
 // gh pr merge is allowed only when the card's done target is "merged"; otherwise it is denied.
 const MERGE_RULE = 'Bash(gh pr merge:*)';
 function allowShipCommands(wt, card) {

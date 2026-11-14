@@ -74,9 +74,9 @@ PR link if there is one. Your session stays open afterwards; the person may come
 ## Review findings that are not fixed
 
 - Applies to every review you run (`/ship` step 2, `/code-review` for `local-reviewed`, any other self-review).
-- Every review finding that is confirmed valid and that you do not fix in this change (out of scope, not worth fixing now)
+- Every review finding that is confirmed valid and that you do not fix in this change (minor, out of scope, not worth fixing now; high and medium findings are still fixed first, see `/ship`)
   must be saved as a GitHub issue: one `gh issue create` per finding (file:line, what is wrong, suggested fix, the card id),
-  after checking `gh issue list --search "<title>" --state open` so you never create a duplicate.
+  after checking `gh issue list --search "<file:line or title>" --state all` so you never create a duplicate.
 - Do not open issues for false positives or for findings you fixed.
 - Link the issues in the PR note (when there is a PR) and in the `done` summary.
 - Only when the repo has a remote and `gh` works. Otherwise (no remote, or `gh` fails) list those findings in the `done` summary.
