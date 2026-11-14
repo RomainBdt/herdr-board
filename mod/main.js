@@ -845,8 +845,8 @@ export default class HerdrBoard extends View {
     this.done = "pr-ready";
     this.model = "";          // "" = let the planner propose
     this.effort = "";
-    this.approved = false;
     this.creating = false;
+    this.created = "";        // id of a card already made by this form (see create)
     // Plain text areas (same font as the Title field); Tab walks Title -> Context -> Constraints -> Done looks like.
     this.context = TextareaState.new({ value: "" });
     this.constraints = TextareaState.new({ value: "" });
@@ -880,7 +880,8 @@ export default class HerdrBoard extends View {
     cx.stop_propagation();
   }
 
-  create(cx) {
+  // startNow: also start the agent right away, whatever the "Start" choice and the free slots say.
+  create(cx, startNow = false) {
     const p = props();
     if (this.creating) return;   // a second click or Enter would create a second card
     this.errs = {
@@ -889,17 +890,30 @@ export default class HerdrBoard extends View {
     };
     if (this.errs.repo || this.errs.title) { this.msg = ""; cx.notify(); return; }
     const fields = encodeURIComponent(JSON.stringify({
-      done: this.done, model: this.model, effort: this.effort, approved: this.approved,
+      done: this.done, model: this.model, effort: this.effort, approved: startNow,
       context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
     }));
     if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it, or edit the card afterwards."; cx.notify(); return; }
     this.creating = true;
-    this.msg = "Creating…";
+    this.msg = startNow ? "Creating and starting…" : "Creating…";
     cx.notify();
     cx.spawn(async (cx) => {
       const c = p.boards[this.pick.b].conn;
-      const r = await cli(c, ["new", this.pick.repo, this.title.trim(), "--fields", fields]);
-      if (!r.ok) { this.creating = false; this.msg = r.err; cx.notify(); return; }
+      let id = this.created;   // set when an earlier Create and start made the card but could not start it: retry only the start
+      if (!id) {
+        const r = await cli(c, ["new", this.pick.repo, this.title.trim(), "--fields", fields]);
+        if (!r.ok) { this.creating = false; this.msg = r.err; cx.notify(); return; }
+        id = this.created = String(r.out).trim().split(/\s+/)[0];
+      }
+      if (startNow) {
+        const s = await cli(c, ["start", id], 90000);
+        // an auto-start tick may have started the (approved) card between `new` and `start`: that is a success
+        if (!s.ok && !/already running/.test(s.err)) {
+          // the card exists and is approved: it will start when a slot is free, or press Create and start again
+          setShared(BUMP, Date.now());
+          this.creating = false; this.msg = `${id} was created but did not start: ${s.err}`; cx.notify(); return;
+        }
+      }
       setShared(BUMP, Date.now());
       closeOverlay(p.overlay);
     });
@@ -984,13 +998,12 @@ export default class HerdrBoard extends View {
         .child(label("Model", "Auto: the planner proposes"))
         .child(chip("model", [["", "Auto"], ["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], this.model, (v) => { this.model = v; }))
         .child(label("Effort", "Auto: the planner proposes"))
-        .child(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; }))
-        .child(label("Start", "Without approval the card waits for you in To do"))
-        .child(chip("appr", [[false, "Wait for my approval"], [true, "Start as soon as a slot is free"]], this.approved, (v) => { this.approved = v; })))
+        .child(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; })))
       .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
         .child(button("n-cancel", "Cancel", () => closeOverlay(p.overlay)))
         .child(button("n-help", "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields" }))
-        .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true })));
+        .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true }))
+        .child(button("n-start", "Create and start", (cx) => this.create(cx, true), { primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" })));
   }
 }
