@@ -386,8 +386,8 @@ function startCard(board, card) {
       const base = repo.base || 'main';
       let from = base;
       if (git(['-C', repo.path, 'remote']).split('\n').includes('origin')) {
-        git(['-C', repo.path, 'fetch', '--quiet', 'origin', base]);
-        from = `origin/${base}`;
+        // a base that exists only here (a local branch, a fork's work) can't be fetched: use it as it is
+        try { git(['-C', repo.path, 'fetch', '--quiet', 'origin', base]); from = `origin/${base}`; } catch { from = base; }
       }
       git(['-C', repo.path, 'worktree', 'add', '--no-track', '-b', branch, wt, from]);
     }
