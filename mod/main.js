@@ -374,9 +374,13 @@ export default class HerdrBoard extends View {
       c.questions.forEach((q, i) => rows.push(line("?", `${i + 1}. ${q}`, t.blocked)));
     }
     const live = c.agent === "working";
-    const OUT = { reached: ["✓ reached", t.working], partial: ["◐ partial", t.accent], blocked: ["⛔ blocked", t.blocked],
-      failed: ["✗ failed", t.blocked], abandoned: ["– abandoned", t.dim] };
-    const tag = c.column === "done" ? OUT[c.outcome || "reached"] : null;
+    // Done tag: the Finish-with state reached; "Not reached" when the target was missed; "Blocked" when it cannot continue.
+    const REACHED = { local: "Local commit", "local-reviewed": "Local + review", "draft-pr": "Draft PR", "pr-ready": "PR ready", merged: "Merged" };
+    const out = c.outcome || "reached";
+    const tag = c.column !== "done" ? null
+      : out === "reached" ? ["✓ " + (REACHED[c.done] || "Done"), t.working]
+      : out === "blocked" ? ["⛔ Blocked", t.blocked]
+      : ["✗ Not reached" + (REACHED[c.done] ? `: ${REACHED[c.done]}` : ""), out === "abandoned" ? t.dim : t.blocked];
     return h_flex().id(`card-${c.uid}`).w_full().rounded(8).overflow_hidden().flex_shrink_0()
       .bg(t.background).border_1().border_color(c.column === "needs-you" ? t.blocked : t.border)
       .cursor_pointer().hover((s) => s.border_color(t.input))
