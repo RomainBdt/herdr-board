@@ -63,3 +63,11 @@ shows under **needs-you** with the reason.
 - If the server's core won't start over SSH ("refusing to start an elevated Windows core"), start it once in a
   desktop session there (`hc server start`) or open Herdr on it.
 - A new worktree opens on Claude's "trust this folder?" prompt; `start` answers yes.
+- A new card branches from `origin/<base>` after a fetch when the repo has an `origin`, else from the local base.
+
+## Testing on one laptop (fake server)
+
+OpenSSH Server on the laptop, listening on 127.0.0.1 only (`C:\fake-server\setup-sshd.ps1`), an ssh Host `fakeserver`,
+and `hc machine add fakeserver --name server --session fakeserver`. After each reboot, in an admin PowerShell
+`Start-Service sshd`, then in a normal terminal `HC_SESSION=fakeserver hc server start` (the elevated SSH login may not
+start it while you are signed in at the desktop). `Stop-Service sshd` when done testing.

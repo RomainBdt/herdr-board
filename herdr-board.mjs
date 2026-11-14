@@ -21,7 +21,8 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 // ---------- small helpers ----------
 
-function die(msg) { console.error(`herdr-board: ${msg}`); process.exit(1); }
+class BoardError extends Error {}
+function die(msg) { throw new BoardError(msg); }   // caught in main: message + exit 1
 function now() {   // local time, "2026-11-14 10:04"
   const d = new Date();
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace('T', ' ');
@@ -143,6 +144,14 @@ function whereOf(card) {
   return out;
 }
 
+const ANSWERS_HINT = (id) => `_Write your answers here, then run \`answer ${id}\`._`;
+
+// The answers you wrote: the section without its italic hint and timestamp lines.
+function answersOf(card) {
+  return (section(card, 'Answers')?.body || '')
+    .split('\n').filter(l => !/^\s*_.*_\s*$/.test(l)).join('\n').trim();
+}
+
 function questionsOf(card) {
   return (section(card, 'Questions')?.body || '')
     .split('\n').map(l => l.match(/^\s*\d+[.)]\s+(.*)$/)?.[1]).filter(Boolean);
@@ -160,6 +169,7 @@ function liveTerminals(board) {
 // What the board should show, from the card's status and its agent's live state.
 function display(card, live) {
   const status = card.meta.status || 'todo';
+  if (card.meta.start_error && status !== 'running') return { column: 'needs-you', note: `could not start: ${card.meta.start_error}` };
   if (status !== 'running') return { column: status, note: '' };
   const t = live[termName(card.id)];
   if (!t) return { column: 'needs-you', note: 'agent stopped (no terminal)' };
@@ -208,7 +218,7 @@ function cmdLs(board, args) {
       path: slash(c.path),
     };
   });
-  const running = cards.filter(c => c.status === 'running').length;
+  const running = cards.filter(c => c.column === 'running').length;   // same rule as the queue's free slots
   if (args.includes('--json')) {
     console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, running, machine: board.machine || '', cards }, null, 2));
     return;
@@ -239,8 +249,15 @@ function cmdWhere(board, [id, goal, done, next]) {
 function cmdAsk(board, [id, ...qs]) {
   if (!id || !qs.length) die('usage: ask <id> "<question 1>" ["<question 2>" ...]');
   const card = loadCard(board, id);
+  // an earlier round of questions and answers moves to History, so the card shows only the open ones
+  const oldQ = section(card, 'Questions')?.body || '';
+  if (oldQ.trim()) {
+    const oldA = answersOf(card) || '(no answers)';
+    const hist = section(card, 'History')?.body || '';
+    setSection(card, 'History', `${hist}\n\n${oldQ}\n\nAnswers: ${oldA}`.trim());
+  }
   setSection(card, 'Questions', `_Asked ${now()}_\n\n` + qs.map((q, i) => `${i + 1}. ${q}`).join('\n'));
-  setSection(card, 'Answers', section(card, 'Answers')?.body || '');
+  setSection(card, 'Answers', ANSWERS_HINT(card.id));
   card.meta.status = 'needs-you';
   card.meta.updated = now();
   saveCard(card);
@@ -252,10 +269,10 @@ function cmdAnswer(board, [id, ...text]) {
   if (!id) die('usage: answer <id> ["<answer text>"]   (or write them in the card under ## Answers first)');
   const card = loadCard(board, id);
   if (text.length) {
-    const prev = section(card, 'Answers')?.body || '';
+    const prev = answersOf(card);
     setSection(card, 'Answers', `${prev}\n\n_${now()}_\n${text.join(' ')}`.trim());
   }
-  const answers = (section(card, 'Answers')?.body || '').trim();
+  const answers = answersOf(card);
   if (!answers) die(`${card.id}: no answers yet. Write them under "## Answers" in ${slash(card.path)} or pass them as text.`);
   card.meta.status = 'running';
   card.meta.updated = now();
@@ -303,15 +320,35 @@ function queue(board) {
     .sort((a, b) => (Number(a.meta.proposed_order) || 99) - (Number(b.meta.proposed_order) || 99) || a.id.localeCompare(b.id));
 }
 
+// A slot is taken only by an agent that is alive and not stopped: a crashed or stalled agent
+// shows under needs-you and does not hold the queue up.
+function busyCount(board) {
+  const live = liveTerminals(board);
+  return allCards(board).filter(c => {
+    if (c.meta.status !== 'running') return false;
+    const t = live[termName(c.id)];
+    return t && !['done', 'idle', 'error'].includes(t.status);
+  }).length;
+}
+
+// Called by you (next) and by agents (ask, done). A card that fails to start gets the reason on it;
+// the caller's own command still succeeds.
 function startNext(board, { quiet = false } = {}) {
-  const running = allCards(board).filter(c => c.meta.status === 'running').length;
+  const running = busyCount(board);
   let free = board.maxParallel - running;
   const started = [];
   for (const c of queue(board)) {
     if (free <= 0) break;
-    startCard(board, c);
-    started.push(c.id);
-    free--;
+    try {
+      startCard(board, c);
+      started.push(c.id);
+      free--;
+    } catch (e) {
+      const fresh = loadCard(board, c.id);
+      fresh.meta.start_error = String(e.message).replace(/\s+/g, ' ').slice(0, 200);
+      saveCard(fresh);
+      console.log(`${c.id}: could not start: ${fresh.meta.start_error}`);
+    }
   }
   if (!quiet || started.length) console.log(started.length ? `started: ${started.join(', ')}` : `nothing to start (${running}/${board.maxParallel} running)`);
 }
@@ -327,6 +364,7 @@ function startCard(board, card) {
   const effort = card.meta.effort || card.meta.proposed_effort || 'medium';
   const name = termName(card.id);
   if (liveTerminals(board)[name]) die(`${card.id}: its agent (${name}) is already running`);
+  hc(board, ['rm', name], { json: false, allowFail: true });   // a finished one with the same name
 
   // worktree on branch card/<ID>
   const wt = slash(resolve(board.worktrees, card.id));
@@ -335,7 +373,16 @@ function startCard(board, card) {
     let hasBranch = true;
     try { git(['-C', repo.path, 'rev-parse', '--verify', '--quiet', branch]); } catch { hasBranch = false; }
     if (hasBranch) git(['-C', repo.path, 'worktree', 'add', wt, branch]);
-    else git(['-C', repo.path, 'worktree', 'add', '-b', branch, wt, repo.base || 'main']);
+    else {
+      // start from the remote's latest base when there is a remote; a local main is often behind
+      const base = repo.base || 'main';
+      let from = base;
+      if (git(['-C', repo.path, 'remote']).split('\n').includes('origin')) {
+        git(['-C', repo.path, 'fetch', '--quiet', 'origin', base]);
+        from = `origin/${base}`;
+      }
+      git(['-C', repo.path, 'worktree', 'add', '--no-track', '-b', branch, wt, from]);
+    }
   }
 
   const rules = renderRules(board, card);
@@ -353,6 +400,7 @@ function startCard(board, card) {
   card.meta.model = model;
   card.meta.effort = effort;
   card.meta.started = now();
+  delete card.meta.start_error;
   card.meta.branch = branch;
   card.meta.worktree = wt;
   saveCard(card);
@@ -451,4 +499,9 @@ if (!cmd || !commands[cmd]) {
   console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
   process.exit(cmd ? 1 : 0);
 }
-commands[cmd](loadBoard(boardDir), rest);
+try {
+  commands[cmd](loadBoard(boardDir), rest);
+} catch (e) {
+  console.error(`herdr-board: ${e instanceof BoardError ? e.message : e.stack}`);
+  process.exit(1);
+}
