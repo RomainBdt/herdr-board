@@ -139,7 +139,7 @@ the repos. You can open any card's session in Herdr and type into it at any time
 
 ## Daily use
 
-Click **+** to make a card, fill in Context / Constraints / Done looks like, **Plan**, approve, **Start next**.
+Click **+** to make a card, fill in Context / Constraints / Done looks like, approve, **Start next**.
 Cards that need you move to **Needs you**: answer there. The command line does the same (see Commands).
 
 ## Layout on the server
@@ -157,8 +157,7 @@ herdr-board/                 this code, copied by ./deploy.sh
 
 ## Flow
 
-`new` → you fill in Context / Constraints / Done looks like → `plan` (proposes model, effort, order)
-→ `approve` (or `approved: true` on the card) → `next` starts cards while slots are free
+`new` → you fill in Context / Constraints / Done looks like → `approve` (or `approved: true` on the card) → `next` starts cards by id while slots are free
 → the agent works, keeps "Where we are" up to date, and either
 `ask`s (all its questions at once; card goes to **needs-you**) or calls `done`.
 → you write answers under `## Answers` and run `answer <id>` (or `answer <id> "text"`); the agent continues.
@@ -176,8 +175,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 |---|---|---|
 | you | `new <repo> "<title>"` | new card from the template |
 | you | `draft <repo> ["<title>"]` | the "Create with agent" button: a chat agent asks what is missing, then makes the card with `new --fields-file` (never auto-approved) |
-| you | `plan` | a one-shot Claude proposes model/effort/order for waiting cards |
-| you | `approve <id> [--model m] [--effort e]` | ready to start (takes the proposal by default) |
+| you | `approve <id> [--model m] [--effort e]` | ready to start (default sonnet / medium) |
 | you | `unapprove <id>` | back to To do, not approved (only before the card starts) |
 | you | `next` / `start <id>` | start queued cards up to `maxParallel` / start one now |
 | timer | `tick` | `next`, but only if `autoStart` is on and its interval has passed (the panel calls it every 30 s) |
@@ -201,7 +199,6 @@ read from the end of its Claude session transcript, else from its terminal), to 
   "hcSession": "<only for a separate test core; leave out normally>",
   "maxParallel": 3,
   "permissionMode": "auto",
-  "plannerModel": "sonnet",
   "autoStart": { "enabled": false, "intervalMinutes": 5 },
   "worktrees": "D:/work/worktrees",
   "repos": {
@@ -256,7 +253,7 @@ it from the keyboard (not Ctrl+B: Claude Code uses it).
 | Refresh every | 5 s, 15 s, 1 min |
 | Alerts | toast + sound when a card needs you; when one is done (off by default: Herdr already tells you) |
 | Auto-start / Auto-start every | per board, saved in its `board.json`: on or off, and 1, 5, 10, 15, 30 or 60 minutes |
-| Boards | one or more, each switched On or Off independently: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once, Planner model and Clean button behavior (saved in that board's `board.json` with `herdr-board config ...`) |
+| Boards | one or more, each switched On or Off independently: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once and Clean button behavior (saved in that board's `board.json` with `herdr-board config ...`) |
 
 Display and connection settings are kept in Herdr's shared state (`herdr-board.settings`).
 
@@ -265,7 +262,7 @@ Display and connection settings are kept in Herdr's shared state (`herdr-board.s
 Add a board per machine in ⚙ → Boards (e.g. this computer and a server over ssh), each with its own `board.json`,
 cards and agents. The panel reads them all and shows their cards together; each card is tagged with its board and
 every button (Approve, Start, Answer, Open, Clean, the card editor) runs on that card's machine. **+** asks which
-board's repo the new card is for; **Plan** and **Start next** run on every board. A board that can't be read (ssh
+board's repo the new card is for; **Start next** runs on every board. A board that can't be read (ssh
 down) keeps its last cards and shows its error in the header; the others carry on. Deploy the CLI to each machine
 with `./deploy.sh` (or point the local board at this checkout).
 
@@ -276,7 +273,7 @@ with `./deploy.sh` (or point the local board at this checkout).
   (Done starts folded).
 - **Answer** shows the questions with a box for your answers; **Send answers** delivers them to the live session.
 - The card editor saves on the server and refuses if an agent changed the card meanwhile.
-- **+**, **Plan**, **▶ Start next** in the header. Each card's tab is named after the card.
+- **+**, **▶ Start next** in the header. Each card's tab is named after the card.
 - Commands for `keys.json`: `herdr-board.answer` (first card with questions), `herdr-board.jump` (its session),
   `herdr-board.settings`, `herdr-board.refresh`, `herdr-board-tabs.toggle`.
 
