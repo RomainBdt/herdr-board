@@ -383,13 +383,12 @@ export default class HerdrBoard extends View {
     const line = (icon, text, color) => !text ? null :
       h_flex().gap(5).min_w(0).text_size(11.5).text_color(color ?? t.muted)
         .child(div().flex_shrink_0().w(12).child(icon)).child(div().min_w(0).truncate().child(text));
-    const model = c.model ? `${c.model} · ${c.effort}` : "sonnet · medium";
+    const model = `${c.model || "sonnet"} · ${c.effort || "medium"}`;
     const rows = [];
     const compact = S().compact && ["todo", "ready", "done", "archived"].includes(c.column);   // one line + buttons
     if (compact) {
       // title and buttons only
-    } else if (c.column === "todo" || c.column === "ready") {
-    } else {
+    } else if (c.column !== "todo" && c.column !== "ready") {
       rows.push(line("◎", c.where.goal, t.foreground));
       if (c.column !== "done" && c.column !== "archived") rows.push(line("✓", c.where.done));
       rows.push(line("→", c.column === "done" || c.column === "archived" ? "" : c.where.next, t.accent));

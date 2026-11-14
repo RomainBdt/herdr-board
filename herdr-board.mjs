@@ -501,7 +501,7 @@ function cmdLs(board, args) {
     if (!list.length) continue;
     console.log(`\n${col.toUpperCase()} (${list.length})`);
     for (const c of list) {
-      const mod = c.model ? `${c.model}/${c.effort}` : '';
+      const mod = c.model || c.effort ? `${c.model || 'sonnet'}/${c.effort || 'medium'}` : '';
       console.log(`  ${c.id.padEnd(9)} ${c.title}  [${c.repo}${mod ? ' · ' + mod : ''}]${c.note ? '  ⚠ ' + c.note : ''}`);
       if (c.lastMessage) console.log(`            “${c.lastMessage}”`);
       if (c.where.next) console.log(`            → ${c.where.next}`);
@@ -618,7 +618,7 @@ function cmdUnapprove(board, args) {
 function queue(board) {
   return allCards(board)
     .filter(c => c.meta.status === 'ready' || ((c.meta.status || 'todo') === 'todo' && c.meta.approved === 'true'))
-    .sort((a, b) => a.id.localeCompare(b.id));
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
 
 // A slot is taken only by an agent that is alive and not stopped: a crashed or stalled agent
