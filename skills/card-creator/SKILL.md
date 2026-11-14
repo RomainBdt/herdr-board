@@ -55,5 +55,6 @@ Pick the lowest pair that does the job. Do not use `max`.
    ```
 
 3. Run `node <herdr-board.mjs> --board <board folder> new <repo> "<title>" --fields-file <that file>`.
-   The board folder is `$HERDR_BOARD` if set, otherwise ask the person. `<repo>` is a repo name from its `board.json`.
+   `<herdr-board.mjs>` is the CLI file of the herdr-board checkout (on the server when the board lives there; ask the person if you
+   cannot find it). The board folder is `$HERDR_BOARD` if set, otherwise ask the person. `<repo>` is a repo name from its `board.json`.
 4. Tell the person the card id and that it waits for their approval. Stop.
