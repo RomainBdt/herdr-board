@@ -67,10 +67,33 @@ shows under **needs-you** with the reason.
 
 ## Testing on one laptop (fake server)
 
-OpenSSH Server on the laptop, listening on 127.0.0.1 only (`C:\fake-server\setup-sshd.ps1`), an ssh Host `fakeserver`,
-and `hc machine add fakeserver --name server --session fakeserver`. After each reboot, in an admin PowerShell
-`Start-Service sshd`, then in a normal terminal `HC_SESSION=fakeserver hc server start` (the elevated SSH login may not
-start it while you are signed in at the desktop). `Stop-Service sshd` when done testing.
+A user-level OpenSSH server on the laptop (no admin, no service), in `~/fake-server`:
+
+```sh
+mkdir -p ~/fake-server && cd ~/fake-server
+ssh-keygen -q -t ed25519 -N "" -f id_fake && ssh-keygen -q -t ed25519 -N "" -f hostkey && cp id_fake.pub authorized_keys
+cat > sshd_config <<EOF
+Port 2222
+ListenAddress 127.0.0.1
+HostKey C:/Users/<you>/fake-server/hostkey
+PasswordAuthentication no
+AuthorizedKeysFile C:/Users/<you>/fake-server/authorized_keys
+StrictModes no
+EOF
+/c/Windows/System32/OpenSSH/sshd.exe -f C:/Users/<you>/fake-server/sshd_config -D &   # again after each reboot
+```
+
+Add to `~/.ssh/config`: `Host fakeserver` / `HostName 127.0.0.1` / `Port 2222` / `IdentityFile ~/fake-server/id_fake`.
+Then:
+
+```sh
+hc machine add fakeserver --name fakeserver --session fakeserver
+HC_SESSION=fakeserver hc server start
+git init ~/fake-server/fake-project          # the fake project (commit something in it)
+hc run --on fakeserver --bg --no-parent --outlive-parent --name fake-project --cwd ~/fake-server/fake-project --keep
+```
+
+The machine and its `fake-project` terminal then show up in Herdr. Stop: `hc machine rm fakeserver` and end `sshd.exe`.
 
 ## The board panel (Herdr, on the laptop)
 
