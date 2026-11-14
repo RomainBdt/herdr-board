@@ -596,7 +596,8 @@ export default class HerdrBoard extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       const r = await cli(this.rowConn(row), ["config", key, String(value)]);
-      this.msg = r.ok ? "" : r.err;
+      // an older herdr-board.mjs does not know the newer settings and answers with its usage line
+      this.msg = r.ok ? "" : /^usage: config/.test(r.err) ? `This board's herdr-board.mjs is out of date and cannot save "${key}": update it (git pull in its folder).` : r.err;
       if (r.ok) {
         if (key === "autoStart") row.autoStart = { ...row.autoStart, enabled: value === "on" };
         else if (key === "autoInterval") row.autoStart = { ...row.autoStart, intervalMinutes: value };
