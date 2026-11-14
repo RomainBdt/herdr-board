@@ -830,16 +830,17 @@ export default class HerdrBoard extends View {
     this.input = InputState.new({ value: "" });
     this.input.on("change", (_e, cx) => { this.title = this.input.value(); if (this.title.trim()) this.errs.title = ""; cx.notify(); });
     this.input.on("submit", (_e, cx) => this.create(cx));
-    for (const st of [this.input, this.context, this.constraints, this.doneLooks]) st.on("focus", () => { this.focused = st; });
+    this.fields = [this.input, this.context, this.constraints, this.doneLooks];
+    for (const st of this.fields) st.on("focus", () => { this.focused = st; });
     this.focused = this.input;
     this.input.focus();
-    cx.timer.after(400, () => this.input.focus());
+    cx.timer.after(400, () => { if (this.focused === this.input) this.input.focus(); });
   }
 
   // Tab / Shift+Tab: the next / previous text field, in the order they are on the screen.
   tabField(e, cx) {
-    const order = [this.input, this.context, this.constraints, this.doneLooks];
-    const at = order.findIndex((s) => this.focused === s);
+    const order = this.fields;
+    const at = order.indexOf(this.focused);
     const to = order[(Math.max(at, 0) + (e.modifiers?.shift ? order.length - 1 : 1)) % order.length];
     this.focused = to;
     to.focus();
