@@ -116,6 +116,16 @@ export default class HerdrBoard extends View {
         if (!src || bumped || Date.now() - src.last >= S().refresh * 1000) this.refreshOne(cx, c);
       }
     });
+    // Auto-start: every 30 s ask each board to `tick`. The board decides (its autoStart setting and interval,
+    // read fresh each time), so only the active copy ticks and a settings change needs no restart.
+    cx.timer.every(30000, (cx) => {
+      if (!this.active()) return;
+      for (const c of conns()) cx.spawn(async (cx) => {
+        const r = await cli(c, ["tick"], 180000);
+        if (r.ok && /started:/.test(r.out)) this.refreshOne(cx, c);
+        else if (!r.ok) notify({ title: "Auto-start failed", body: r.err.slice(0, 300), level: "error" });
+      });
+    });
     // keys.json can bind these: "herdr-board.answer" opens the first card that needs you,
     // "herdr-board.jump" opens its live session.
     cx.spawn(async (cx) => {
@@ -299,7 +309,7 @@ export default class HerdrBoard extends View {
   openSettings() {
     // what each board's board.json says, so the dialog shows it at once
     const server = Object.fromEntries(this.boards().filter((b) => b.data)
-      .map((b) => [connKey(b.conn), { maxParallel: b.data.maxParallel, plannerModel: b.data.plannerModel, name: b.data.board }]));
+      .map((b) => [connKey(b.conn), { maxParallel: b.data.maxParallel, plannerModel: b.data.plannerModel, autoStart: b.data.autoStart, name: b.data.board }]));
     openOverlay({ mod: "herdr-board", kind: "dialog", width: 600, height: 0.85, props: { dialog: "settings", server } });
   }
 
@@ -492,7 +502,7 @@ export default class HerdrBoard extends View {
 
   makeRow(cx, c, known) {
     const row = { n: this.serial++, machine: c.machine || "", maxParallel: known?.maxParallel ?? null,
-      plannerModel: known?.plannerModel ?? null, name: known?.name ?? "" };
+      plannerModel: known?.plannerModel ?? null, autoStart: known?.autoStart ?? null, name: known?.name ?? "" };
     row.script = InputState.new({ value: c.script });
     row.boardDir = InputState.new({ value: c.board });
     // the paths apply like every other setting: shortly after typing stops, and on closing
@@ -510,14 +520,14 @@ export default class HerdrBoard extends View {
   loadRow(cx, row) {
     const conn = this.rowConn(row);
     row.loaded = connKey(conn);
-    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, plannerModel: null, name: "" }); return; }
+    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, plannerModel: null, autoStart: null, name: "" }); return; }
     cx.spawn(async (cx) => {
       const r = await cli(conn, ["ls", "--json"]);
       if (connKey(this.rowConn(row)) !== connKey(conn)) return;   // changed meanwhile
       try {
         const d = JSON.parse(r.out);
-        Object.assign(row, { maxParallel: d.maxParallel, plannerModel: d.plannerModel, name: d.board });
-      } catch { Object.assign(row, { maxParallel: null, plannerModel: null, name: "" }); }
+        Object.assign(row, { maxParallel: d.maxParallel, plannerModel: d.plannerModel, autoStart: d.autoStart, name: d.board });
+      } catch { Object.assign(row, { maxParallel: null, plannerModel: null, autoStart: null, name: "" }); }
       cx.notify();
     });
   }
@@ -563,7 +573,11 @@ export default class HerdrBoard extends View {
     cx.spawn(async (cx) => {
       const r = await cli(this.rowConn(row), ["config", key, String(value)]);
       this.msg = r.ok ? "" : r.err;
-      if (r.ok) row[key] = value;
+      if (r.ok) {
+        if (key === "autoStart") row.autoStart = { ...row.autoStart, enabled: value === "on" };
+        else if (key === "autoInterval") row.autoStart = { ...row.autoStart, intervalMinutes: value };
+        else row[key] = value;
+      }
       setShared(BUMP, Date.now());
       cx.notify();
     });
@@ -604,7 +618,13 @@ export default class HerdrBoard extends View {
       .child(row("Agents at once", "Saved in its board.json",
         seg(`par-${r.n}`, [1, 2, 3, 4, 5, 6].map((n) => [n, String(n)]), r.maxParallel, (v, cx) => this.serverSetting(cx, r, "maxParallel", v))))
       .child(row("Planner model", "Proposes order, model and effort", seg(`pm-${r.n}`, [["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], r.plannerModel,
-        (v, cx) => this.serverSetting(cx, r, "plannerModel", v))));
+        (v, cx) => this.serverSetting(cx, r, "plannerModel", v))))
+      .child(row("Auto-start", "Start approved cards by itself while slots are free (needs this panel open)",
+        seg(`as-${r.n}`, [["on", "On"], ["off", "Off"]], r.autoStart ? (r.autoStart.enabled ? "on" : "off") : null,
+          (v, cx) => this.serverSetting(cx, r, "autoStart", v))))
+      .child(row("Auto-start every", "Minutes between checks",
+        seg(`ai-${r.n}`, [1, 5, 10, 15, 30, 60].map((n) => [n, n === 60 ? "1 h" : `${n} min`]), r.autoStart?.intervalMinutes,
+          (v, cx) => this.serverSetting(cx, r, "autoInterval", v))));
 
     return v_flex().id("settings").size_full().bg(t.popover).text_color(t.foreground)
       .on_key_down((e, cx) => { if (e.key === "escape") { this.closeSettings(); cx.stop_propagation(); } })
