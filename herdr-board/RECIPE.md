@@ -15,7 +15,7 @@ https://github.com/RomainBdt/herdr-board: the panel is only a view on that CLI.
 A column (268px wide by default, `board-side` slot, between the sidebar and the chat; or six columns in a band above the
 tabs, `board-top`) with:
 
-1. **Header:** the board's name, "n/m running", and buttons: refresh, settings (⚙), **+** (new card), **Plan**, **▶** (start next).
+1. **Header:** the board's name, "n/m running", and buttons: refresh, settings (⚙), **+** (new card), **▶** (start next).
 2. **Cards** grouped by column: To do, Ready, Running, Needs you, Done, Archived. Each card is a row: id (violet,
    e.g. `HB-24`), title, a left stripe in the column color. To do, Ready and Done cards fit on one line when "compact" is on.
 3. **Tags** on Done cards: the done target (None, Local commit, Local + review, Draft PR, PR ready, Merged) each in its
