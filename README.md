@@ -59,6 +59,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | you | `draft <repo> ["<title>"]` | the "Create with agent" button: a chat agent asks what is missing, then makes the card with `new --fields-file` (never auto-approved) |
 | you | `plan` | a one-shot Claude proposes model/effort/order for waiting cards |
 | you | `approve <id> [--model m] [--effort e]` | ready to start (takes the proposal by default) |
+| you | `unapprove <id>` | back to To do, not approved (only before the card starts) |
 | you | `next` / `start <id>` | start queued cards up to `maxParallel` / start one now |
 | timer | `tick` | `next`, but only if `autoStart` is on and its interval has passed (the panel calls it every 30 s) |
 | you | `answer <id> ["text"]` | send your answers to the live session |
