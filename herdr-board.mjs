@@ -9,7 +9,8 @@
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync, rmdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync, rmdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -212,8 +213,53 @@ function liveTerminals(board) {
   return map;
 }
 
+// The agent's last words, for a card whose agent stopped without ask/done. Read from the end of the newest Claude
+// session transcript of its worktree (~/.claude/projects/<path, non-alphanumerics as ->/*.jsonl), else from the
+// bottom of its terminal. Only called for stopped cards, and only the file's tail is read. '' when nothing is found.
+const LAST_MSG_CHARS = 300;
+function clip(text) {
+  const t = String(text).replace(/\s+/g, ' ').trim();
+  return t.length > LAST_MSG_CHARS ? t.slice(0, LAST_MSG_CHARS - 1).trimEnd() + '…' : t;
+}
+function lastMessageFromTranscript(worktree) {
+  const dir = join(homedir(), '.claude', 'projects', String(worktree).replace(/[^A-Za-z0-9]/g, '-'));
+  let newest = null;
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith('.jsonl')) continue;
+    const st = statSync(join(dir, f));
+    if (!newest || st.mtimeMs > newest.mtime) newest = { path: join(dir, f), mtime: st.mtimeMs, size: st.size };
+  }
+  if (!newest) return '';
+  // read the tail, growing it until an assistant text turns up (a long tool result can fill the first chunk)
+  const fd = openSync(newest.path, 'r');
+  try {
+    for (let len = 64 * 1024; ; len *= 4) {
+      const n = Math.min(len, newest.size);
+      const buf = Buffer.alloc(n);
+      readSync(fd, buf, 0, n, newest.size - n);
+      const lines = buf.toString('utf8').split('\n');
+      if (n < newest.size) lines.shift();   // first line is probably cut
+      for (let i = lines.length - 1; i >= 0; i--) {
+        let o; try { o = JSON.parse(lines[i]); } catch { continue; }
+        if (o.type !== 'assistant' || !Array.isArray(o.message?.content)) continue;
+        const text = o.message.content.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
+        if (text) return clip(text);
+      }
+      if (n >= newest.size || len > 16 * 1024 * 1024) return '';
+    }
+  } finally { closeSync(fd); }
+}
+function lastMessageOf(board, card) {
+  try {
+    if (card.meta.worktree && existsSync(card.meta.worktree)) { const m = lastMessageFromTranscript(card.meta.worktree); if (m) return m; }
+  } catch { /* no transcript here (e.g. remote machine): try the terminal */ }
+  const screen = hc(board, ['read', termName(card.id)], { json: false, allowFail: true }) || '';
+  const lines = screen.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^[─━═\s>│╭╰╮╯]*$/.test(l));
+  return clip(lines.slice(-6).join(' '));
+}
+
 // What the board should show, from the card's status and its agent's live state.
-function display(card, live) {
+function display(card, live, board) {
   const status = card.meta.status || 'todo';
   if (card.meta.start_error && status !== 'running') return { column: 'needs-you', note: `could not start: ${card.meta.start_error}` };
   if (status !== 'running') return { column: status, note: '' };
@@ -223,7 +269,7 @@ function display(card, live) {
   if (t.status === 'error') return { column: 'needs-you', note: 'agent reported an error' };
   // just started or just answered: an agent reads as idle for a moment before its turn begins
   const fresh = Date.now() - Number(card.meta.active_ms || 0) < 90000;
-  if (!fresh && (t.status === 'done' || t.status === 'idle')) return { column: 'needs-you', note: 'agent stopped without asking or finishing' };
+  if (!fresh && (t.status === 'done' || t.status === 'idle')) return { column: 'needs-you', note: 'agent stopped without asking or finishing', last: board ? lastMessageOf(board, card) : '' };
   return { column: 'running', note: '' };
 }
 
@@ -309,11 +355,11 @@ function cmdLs(board, args) {
   const live = liveTerminals(board);
   reopenDone(board, live);
   const cards = allCards(board).map(c => {
-    const d = display(c, live);
+    const d = display(c, live, board);
     const repo = board.repos[c.meta.repo] || {};
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
-      status: c.meta.status || 'todo', column: d.column, note: d.note,
+      status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
       done: c.meta.done || '', outcome: c.meta.status === 'done' ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
       approved: c.meta.approved === 'true',
       proposed: c.meta.proposed_model
@@ -340,6 +386,7 @@ function cmdLs(board, args) {
     for (const c of list) {
       const mod = c.model ? `${c.model}/${c.effort}` : c.proposed ? `proposed ${c.proposed.model}/${c.proposed.effort}` : '';
       console.log(`  ${c.id.padEnd(9)} ${c.title}  [${c.repo}${mod ? ' · ' + mod : ''}]${c.note ? '  ⚠ ' + c.note : ''}`);
+      if (c.lastMessage) console.log(`            “${c.lastMessage}”`);
       if (c.where.next) console.log(`            → ${c.where.next}`);
       for (const q of c.questions) if (c.column === 'needs-you') console.log(`            ? ${q}`);
     }

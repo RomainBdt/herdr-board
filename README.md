@@ -67,7 +67,8 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | agent | `where` / `ask` / `done [--state s]` | update its own card; never edits the file directly. `--state` (`reached` default, `partial`, `blocked`, `failed`, `abandoned`) decides the tag shown on a Done card: the Finish-with state reached (None, Local commit, Local + review, Draft PR, PR ready, Merged), "Blocked", or "Not reached" |
 
 `ls` also checks each running agent: a terminal that is gone, blocked on a prompt, or stopped without `ask`/`done`
-shows under **needs-you** with the reason.
+shows under **needs-you** with the reason. For a stopped agent it also shows the agent's last message (~300 characters,
+read from the end of its Claude session transcript, else from its terminal), to tell a forgotten question from an error.
 
 ## board.json
 

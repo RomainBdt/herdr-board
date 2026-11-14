@@ -385,6 +385,7 @@ export default class HerdrBoard extends View {
     }
     if (c.column === "needs-you") {
       if (c.note) rows.push(line("⚠", c.note, t.blocked));
+      if (c.lastMessage) rows.push(line("💬", c.lastMessage, t.muted));
       c.questions.forEach((q, i) => rows.push(line("?", `${i + 1}. ${q}`, t.blocked)));
     }
     const live = c.agent === "working";
