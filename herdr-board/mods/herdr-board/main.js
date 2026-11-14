@@ -362,6 +362,16 @@ export default class HerdrBoard extends View {
       b.push(button(`an-${u}`, "Answer", () => this.answer(c), { primary: true, tip: "Answer its questions; the agent continues" }));
     if (c.column === "needs-you" && !c.address)
       b.push(button(`rs-${u}`, "Restart", (cx) => this.act(cx, `Starting ${id}…`, ["start", id], 90000, on), { tip: "Start its agent again in the same worktree" }));
+    const pr = c.column === "needs-you" ? c.prompt : null;
+    if (pr?.failed) {
+      // sent but still showing: Retry only looks again, the server never sends the same answer twice
+      b.push(button(`pr-${u}`, "Retry", (cx) => this.act(cx, `Checking ${id}…`, ["press", id, ...String(pr.failed.choice).split(" ")], 30000, on),
+        { primary: true, tip: "Look at the prompt again (nothing is sent twice)" }));
+    } else if (pr?.options?.length) {
+      pr.options.forEach((o, i) => b.push(button(`pr-${u}-${i}`, `${o.key}. ${o.label}`.slice(0, 40),
+        (cx) => this.act(cx, `Answering ${id}…`, ["press", id, o.key], 30000, on),
+        { primary: i === 0, tip: o.description || `Press ${o.key} in its session` })));
+    }
     if (c.address && !this.clickOpens(c)) b.push(button(`op-${u}`, "Open", () => this.open(c), { tip: "Open its live session and take over" }));
     if (c.column === "done") b.push(button(`cl-${u}`, "Clean", (cx) => this.act(cx, `Cleaning ${id}…`, ["clean", id], undefined, on), { tone: t.muted, tip: this.cleanTip(c.clean) }));
     if (this.clickOpens(c)) b.push(button(`ed-${u}`, "✎", () => this.edit(c), { tone: t.muted, tip: "Open the card" }));
@@ -389,6 +399,14 @@ export default class HerdrBoard extends View {
       if (c.note) rows.push(line("⚠", c.note, t.blocked));
       if (c.lastMessage) rows.push(line("💬", c.lastMessage, t.muted));
       c.questions.forEach((q, i) => rows.push(line("?", `${i + 1}. ${q}`, t.blocked)));
+      const pr = c.prompt;
+      if (pr) {
+        // the prompt text (one row per line, the screen's last lines for a permission prompt), then what to do about it
+        String(pr.text || "").split("\n").slice(-8).forEach((l, i) => rows.push(line(i ? "" : "❓", l.trim(), t.foreground)));
+        pr.options.filter((o) => o.description).forEach((o) => rows.push(line("", `${o.key}. ${o.label}: ${o.description}`, t.dim)));
+        if (pr.failed) rows.push(line("✗", `${pr.failed.choice} was sent but the prompt is still showing`, t.blocked));
+        else if (!pr.options.length) rows.push(line("↪", "Too complex to answer here: open its session", t.dim));
+      }
     }
     const live = c.agent === "working";
     // Done tag: the Finish-with state reached; "Not reached" when the target was missed; "Blocked" when it cannot continue.

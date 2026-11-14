@@ -25,6 +25,7 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
   or credentials, or a contradiction in the card.
 - Before asking, do all the work that is not blocked. Then ask **all** your questions in **one** `ask` call. Each
   question must stand alone: say what you found, give the options, and say which one you recommend.
+- Always use `ask` to question the person. Never use the AskUserQuestion tool: the board cannot show it as a card question.
 - After `ask`, stop and wait. The answers arrive as a message in this session. The person may also type to you
   directly at any time: they can take over this session whenever they want. Their messages win over the card.
 
