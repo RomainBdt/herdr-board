@@ -778,7 +778,7 @@ export default class HerdrBoard extends View {
         .child(div().text_size(11).text_color(t.dim).child("Esc closes without saving")))
       .when(answering, (el) => el.child(div().px(16).py(8).text_size(12).text_color(t.blocked)
         .child("Write your answers under \"## Answers\", then Send answers. The agent continues in its session.")))
-      .child(div().flex_1().min_h(0).p(8).child(this.code ? Editor.new(this.code).size_full() : div().p(12).text_color(t.muted).child(this.msg || "Loading…")))
+      .child(div().flex_1().min_h(0).p(8).child(this.code ? Editor.new(this.code).size_full() : div().p(12).text_color(t.muted).child(this.msg ? "" : "Loading…")))
       .child(h_flex().px(16).h(52).gap(8).items_center().border_t(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.msg.startsWith("Saving") ? t.muted : t.blocked).child(this.msg))
         .when(this.msg.includes("changed since"), (el) => el.child(button("e-reload", "Reload", (cx) => this.loadCard(cx))))
@@ -859,7 +859,7 @@ export default class HerdrBoard extends View {
     this.doneLooks = TextareaState.new({ value: "" });
     this.input = InputState.new({ value: "" });
     this.input.on("change", (_e, cx) => { this.title = this.input.value(); if (this.title.trim()) this.errs.title = ""; cx.notify(); });
-    this.input.on("submit", (_e, cx) => this.create(cx));
+    this.input.on("submit", (_e, cx) => (this.existing ? this.saveForm(cx) : this.create(cx)));
     this.fields = [this.input, this.context, this.constraints, this.doneLooks];
     if (!globalThis.__hbTabKeys) {
       // Only inside our own dialog: the keymap is the whole app's, so a bare "Input" context would take Tab from every other input.
@@ -930,6 +930,7 @@ export default class HerdrBoard extends View {
   // The text areas bind Tab to their own indent action, which runs before any key handler, so Tab is also bound
   // (in initNew, once) to our own actions in the Input context, where a later binding wins.
   tabField(e, cx, back = Boolean(e?.modifiers?.shift)) {
+    if (this.locked) { cx.stop_propagation(); return; }   // a started card's fields are not changeable: do not walk into them
     const order = this.fields;
     const at = order.indexOf(this.focused);
     const to = order[(Math.max(at, 0) + (back ? order.length - 1 : 1)) % order.length];
@@ -1072,7 +1073,7 @@ export default class HerdrBoard extends View {
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
         .child(button("n-cancel", this.existing && this.locked ? "Close" : "Cancel", () => closeOverlay(p.overlay)))
         .when(this.existing, (el) => el.child(button("n-text", "Edit as text", () => this.editText(), { tip: "Open the card's Markdown file" }))
-          .when(!this.locked, (e2) => e2.child(button("n-save", "Save", (cx) => this.saveForm(cx), { primary: true }))))
+          .when(!this.locked && this.loaded, (e2) => e2.child(button("n-save", "Save", (cx) => this.saveForm(cx), { primary: true }))))
         .when(!this.existing, (el) => el.child(button("n-help", "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields" }))
           .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true }))
           .child(button("n-start", "Create and start", (cx) => this.create(cx, true), { primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" }))));

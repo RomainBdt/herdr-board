@@ -706,7 +706,7 @@ function cmdShow(board, [id]) {
   const text = (name) => { const b = (section(card, name)?.body || '').trim(); return PLACEHOLDERS[name].test(b) ? '' : b; };
   console.log(JSON.stringify({
     id: card.id, title: card.meta.title || '', repo: card.meta.repo || '', status: card.meta.status || 'todo',
-    done: (card.meta.done || '').split('#')[0].trim(), model: card.meta.model || '', effort: card.meta.effort || '',
+    done: card.meta.done || '', model: card.meta.model || '', effort: card.meta.effort || '',
     context: text('Context'), constraints: text('Constraints'), doneLooks: text('Done looks like'),
     hash: textHash(readFileSync(card.path, 'utf8')),
   }));
