@@ -5,7 +5,7 @@
 //
 //   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | approve <id> [--model m] [--effort e] | unapprove <id> | next | start <id>
 //           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
-//   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] "<summary>"
+//   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] [--pr <url>] "<summary>"
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
 
@@ -446,23 +446,52 @@ function cmdNew(board, args) {
   console.log(`${id}  ${slash(path)}`);
 }
 
-// A done card whose agent starts a new turn (the person talked to its session) goes back to running.
-// The agent's own closing turn right after `done` does not count: a grace period covers it.
+// A Done card stays Done while its agent only answers questions. It goes back to Running only on real new work:
+// its terminal stays busy for REOPEN_BUSY_MS in a row (a quick answer takes less), and never during the grace period
+// that covers the agent's own closing turn after `done`. A reopened card remembers its outcome (`reopened_outcome`)
+// and returns to Done by itself once its terminal is idle again, so it never sits in Running after the agent is finished.
+const DONE_GRACE_MS = 180000;
+const REOPEN_BUSY_MS = 300000;
 function reopenDone(board, live) {
   for (const c of allCards(board)) {
-    if (c.meta.status !== 'done') continue;
     const t = live[termName(c.id)];
-    if (!t || ['done', 'idle', 'blocked', 'error'].includes(t.status)) continue;
-    if (Date.now() - Number(c.meta.done_ms || 0) < 180000) continue;
+    const busy = !!t && !['done', 'idle', 'blocked', 'error'].includes(t.status);
+    if (c.meta.status === 'running' && c.meta.reopened_outcome) {
+      // a reopened card whose agent went quiet again: back to Done with its earlier outcome
+      if (!t || busy || t.status === 'blocked' || t.status === 'error') continue;
+      if (Date.now() - Number(c.meta.active_ms || 0) < 90000) continue;
+      const card = loadCard(board, c.id);
+      if (card.meta.status !== 'running' || !card.meta.reopened_outcome) continue;
+      card.meta.status = 'done';
+      card.meta.outcome = card.meta.reopened_outcome;
+      delete card.meta.reopened_outcome;
+      card.meta.done_ms = String(Date.now());
+      const w = whereOf(card);
+      setSection(card, 'Where we are', `- Goal: ${w.goal}
+- Done: ${w.done}
+- Next: nothing, card done (see Result)`);
+      card.meta.updated = now();
+      saveCard(card);
+      continue;
+    }
+    if (c.meta.status !== 'done') continue;
+    if (!busy || Date.now() - Number(c.meta.done_ms || 0) < DONE_GRACE_MS) {
+      if (c.meta.busy_ms) { const card = loadCard(board, c.id); delete card.meta.busy_ms; saveCard(card); }
+      continue;
+    }
+    if (!c.meta.busy_ms) { const card = loadCard(board, c.id); if (card.meta.status === 'done') { card.meta.busy_ms = String(Date.now()); saveCard(card); } continue; }
+    if (Date.now() - Number(c.meta.busy_ms) < REOPEN_BUSY_MS) continue;
     const card = loadCard(board, c.id);
     // re-check on the fresh file: the agent may have run `done` since the board was listed
-    if (card.meta.status !== 'done' || Date.now() - Number(card.meta.done_ms || 0) < 180000) continue;
+    if (card.meta.status !== 'done' || Date.now() - Number(card.meta.done_ms || 0) < DONE_GRACE_MS) continue;
+    card.meta.reopened_outcome = card.meta.outcome || 'reached';
     card.meta.status = 'running';
     delete card.meta.outcome;
     delete card.meta.done_ms;
+    delete card.meta.busy_ms;
     setSection(card, 'Where we are', `- Goal: ${whereOf(card).goal}
 - Done: see Result
-- Next: working on a new request from the person`);
+- Next: working on new work after the card was done`);
     card.meta.active_ms = String(Date.now());
     card.meta.updated = now();
     saveCard(card);
@@ -531,6 +560,7 @@ function cmdAsk(board, [id, ...qs]) {
   }
   setSection(card, 'Questions', `_Asked ${now()}_\n\n` + qs.map((q, i) => `${i + 1}. ${q}`).join('\n'));
   setSection(card, 'Answers', ANSWERS_HINT(card.id));
+  delete card.meta.reopened_outcome;   // the card is a live question again: it must not slide back to Done by itself
   card.meta.status = 'needs-you';
   card.meta.updated = now();
   saveCard(card);
@@ -569,12 +599,17 @@ function cmdDone(board, args) {
   const flag = takeFlag(args, '--state');
   if (given && !flag) die(`--state needs a value: ${OUTCOMES.join(', ')}`);
   const state = flag || 'reached';
+  const givenPr = args.includes('--pr');
+  const pr = takeFlag(args, '--pr');
+  if (givenPr && !pr) die('--pr needs the pull request link');
   const [id, ...summary] = args;
-  if (!id || !summary.length) die(`usage: done <id> [--state ${OUTCOMES.join('|')}] "<summary>"`);
+  if (!id || !summary.length) die(`usage: done <id> [--state ${OUTCOMES.join('|')}] [--pr <url>] "<summary>"`);
   if (!OUTCOMES.includes(state)) die(`--state must be one of ${OUTCOMES.join(', ')}`);
   const card = loadCard(board, id);
   card.meta.outcome = state;
-  setSection(card, 'Result', `_${now()}_\n\n${summary.join(' ')}`);
+  setSection(card, 'Result', `_${now()}_\n\n${summary.join(' ')}${pr ? `\n\nPull request: ${pr}` : ''}`);
+  delete card.meta.reopened_outcome;   // an explicit `done` replaces the outcome remembered by a reopen
+  delete card.meta.busy_ms;
   const w = whereOf(card);
   setSection(card, 'Where we are', `- Goal: ${w.goal}\n- Done: ${w.done}\n- Next: nothing, card done (see Result)`);
   card.meta.status = 'done';

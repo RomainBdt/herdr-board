@@ -11,10 +11,12 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
     Run it once you understand the task, then after each milestone. The person reads these lines to get back into
     the topic in seconds, so write them for someone who forgot everything.
   - `{{board}} ask {{id}} "<question 1>" "<question 2>" ...`: when you are blocked (see below).
-  - `{{board}} done {{id}} [--state <state>] "<summary>"`: when you stop for good. The state is shown as a tag on the card:
+  - `{{board}} done {{id}} [--state <state>] [--pr <url>] "<summary>"`: when you stop for good. The state is shown as a tag on the card:
     `reached` (default: the done target is reached), `partial` (part of it works, the rest is not done),
     `blocked` (cannot go on and asking the person would not help; if a question can unblock you, use `ask` instead), `failed` (tried, it does not work),
     `abandoned` (not worth doing or no longer needed). Say why in the summary when it is not `reached`.
+    Put the pull request link in `--pr` if there is one. After `done` you may answer the person's questions: the card stays Done.
+    If you then do real new work or the situation changes (e.g. the person merged the PR), run `done` again with the new state.
 - "Constraints" are hard rules. "Context" and "Done looks like" define the job.
 
 ## Autonomy
