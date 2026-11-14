@@ -356,6 +356,7 @@ export default class HerdrBoard extends View {
     if (c.column === "todo") b.push(button(`ap-${u}`, c.proposed || c.model ? "Approve" : "Approve (sonnet)", (cx) => this.act(cx, `Approving ${id}…`, ["approve", id], undefined, on),
       { tip: c.proposed ? `${c.proposed.model} / ${c.proposed.effort}: ${c.proposed.note}` : "No plan yet: uses the card's model, else sonnet / medium" }));
     if (c.column === "ready") b.push(button(`st-${u}`, "Start", (cx) => this.act(cx, `Starting ${id}…`, ["start", id], 90000, on)));
+    if (c.column === "ready") b.push(button(`un-${u}`, "To do", (cx) => this.act(cx, `Moving ${id} back to To do…`, ["unapprove", id], undefined, on), { tone: t.muted, tip: "Not started yet: move it back to To do (not approved)" }));
     if (c.column === "needs-you" && c.questions.length && c.status === "needs-you")
       b.push(button(`an-${u}`, "Answer", () => this.answer(c), { primary: true, tip: "Answer its questions; the agent continues" }));
     if (c.column === "needs-you" && !c.address)
@@ -395,6 +396,7 @@ export default class HerdrBoard extends View {
     }
     if (c.column === "needs-you") {
       if (c.note) rows.push(line("⚠", c.note, t.blocked));
+      if (c.lastMessage) rows.push(line("💬", c.lastMessage, t.muted));
       c.questions.forEach((q, i) => rows.push(line("?", `${i + 1}. ${q}`, t.blocked)));
       const pr = c.prompt;
       if (pr) {
