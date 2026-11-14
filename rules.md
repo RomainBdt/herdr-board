@@ -11,7 +11,10 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
     Run it once you understand the task, then after each milestone. The person reads these lines to get back into
     the topic in seconds, so write them for someone who forgot everything.
   - `{{board}} ask {{id}} "<question 1>" "<question 2>" ...`: when you are blocked (see below).
-  - `{{board}} done {{id}} "<summary>"`: when the done target is reached.
+  - `{{board}} done {{id}} [--state <state>] "<summary>"`: when you stop for good. The state is shown as a tag on the card:
+    `reached` (default: the done target is reached), `partial` (part of it works, the rest is not done),
+    `blocked` (cannot go on without something you cannot get), `failed` (tried, it does not work),
+    `abandoned` (not worth doing or no longer needed). Say why in the summary when it is not `reached`.
 - "Constraints" are hard rules. "Context" and "Done looks like" define the job.
 
 ## Autonomy
@@ -41,5 +44,5 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
 - `merged`: as `pr-ready`, then merge it once checks pass and the repo's rules allow it.
 - anything else: it is written in plain words: do exactly that.
 
-Then run `done` with a summary: what changed, decisions you made alone, anything the person should check, and the
+Then run `done` (with `--state` if the target was not fully reached) and a summary: what changed, decisions you made alone, anything the person should check, and the
 PR link if there is one. Your session stays open afterwards; the person may come back to it.

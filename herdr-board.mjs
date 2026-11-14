@@ -5,7 +5,7 @@
 //
 //   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | plan | approve <id> [--model m] [--effort e] | next | start <id>
 //           answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
-//   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> "<summary>"
+//   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] "<summary>"
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
 
@@ -250,7 +250,7 @@ function cmdLs(board, args) {
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note,
-      done: c.meta.done || '', model: c.meta.model || '', effort: c.meta.effort || '',
+      done: c.meta.done || '', outcome: c.meta.status === 'done' || c.meta.status === 'archived' ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
       approved: c.meta.approved === 'true',
       proposed: c.meta.proposed_model
         ? { model: c.meta.proposed_model, effort: c.meta.proposed_effort, order: Number(c.meta.proposed_order) || 99, note: c.meta.plan_note || '' }
@@ -333,9 +333,16 @@ function cmdAnswer(board, args) {
   console.log(`${card.id}: answers sent to ${name}`);
 }
 
-function cmdDone(board, [id, ...summary]) {
-  if (!id || !summary.length) die('usage: done <id> "<summary>"');
+// What state a finished card reached. Shown as a tag on the card.
+const OUTCOMES = ['reached', 'partial', 'blocked', 'failed', 'abandoned'];
+
+function cmdDone(board, args) {
+  const state = takeFlag(args, '--state') || 'reached';
+  const [id, ...summary] = args;
+  if (!id || !summary.length) die(`usage: done <id> [--state ${OUTCOMES.join('|')}] "<summary>"`);
+  if (!OUTCOMES.includes(state)) die(`--state must be one of ${OUTCOMES.join(', ')}`);
   const card = loadCard(board, id);
+  card.meta.outcome = state;
   setSection(card, 'Result', `_${now()}_\n\n${summary.join(' ')}`);
   const w = whereOf(card);
   setSection(card, 'Where we are', `- Goal: ${w.goal}\n- Done: ${w.done}\n- Next: nothing, card done (see Result)`);

@@ -374,6 +374,9 @@ export default class HerdrBoard extends View {
       c.questions.forEach((q, i) => rows.push(line("?", `${i + 1}. ${q}`, t.blocked)));
     }
     const live = c.agent === "working";
+    const OUT = { reached: ["✓ reached", t.working], partial: ["◐ partial", t.accent], blocked: ["⛔ blocked", t.blocked],
+      failed: ["✗ failed", t.blocked], abandoned: ["– abandoned", t.dim] };
+    const tag = c.column === "done" ? OUT[c.outcome || "reached"] : null;
     return h_flex().id(`card-${c.uid}`).w_full().rounded(8).overflow_hidden().flex_shrink_0()
       .bg(t.background).border_1().border_color(c.column === "needs-you" ? t.blocked : t.border)
       .cursor_pointer().hover((s) => s.border_color(t.input))
@@ -386,6 +389,8 @@ export default class HerdrBoard extends View {
           .child(div().min_w(0).flex_1().truncate().text_size(12.5).font_medium().text_color(t.foreground).child(c.title))
           .when(c.multi, (el) => el.child(div().flex_shrink_0().max_w(110).truncate().px(5).rounded(4).bg(t.raised)
             .text_size(10.5).text_color(t.muted).child(c.boardLabel)))
+          .when(Boolean(tag), (el) => el.child(div().flex_shrink_0().px(5).rounded(4).bg(t.raised)
+            .text_size(10.5).font_medium().text_color(tag[1]).child(tag[0])))
           .when(live, (el) => el.child(div().flex_shrink_0().text_size(11).text_color(t.working)
             .frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90))))
         .when(!compact, (el) => el.child(div().text_size(11).text_color(t.dim).truncate().child(`${c.repo} · ${model} · ${c.done}`)))
