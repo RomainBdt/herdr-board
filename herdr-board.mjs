@@ -510,6 +510,8 @@ function startCard(board, card) {
   const wt = slash(resolve(board.worktrees, card.id));
   const branch = `card/${card.id}`;
   if (!existsSync(wt)) {
+    // a worktree folder deleted by hand stays registered in git and blocks the add: prune drops only those
+    try { git(['-C', repo.path, 'worktree', 'prune']); } catch { /* the add reports any real problem */ }
     let hasBranch = true;
     try { git(['-C', repo.path, 'rev-parse', '--verify', '--quiet', branch]); } catch { hasBranch = false; }
     if (hasBranch) git(['-C', repo.path, 'worktree', 'add', wt, branch]);
