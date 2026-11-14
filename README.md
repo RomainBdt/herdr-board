@@ -96,10 +96,18 @@ it from the keyboard (not Ctrl+B: Claude Code uses it).
 | Show Done | |
 | Refresh every | 5 s, 15 s, 1 min |
 | Alerts | toast + sound when a card needs you; when one is done (off by default: Herdr already tells you) |
-| Agents at once, Planner model | saved in the server's `board.json` (`herdr-board config ...`) |
-| Connection | machine, path of `herdr-board.mjs` and of the board folder on it |
+| Boards | one or more: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once and Planner model (saved in that board's `board.json` with `herdr-board config ...`) |
 
 Display and connection settings are kept in Herdr's shared state (`herdr-board.settings`).
+
+### Several machines at once
+
+Add a board per machine in ⚙ → Boards (e.g. this computer and a server over ssh), each with its own `board.json`,
+cards and agents. The panel reads them all and shows their cards together; each card is tagged with its board and
+every button (Approve, Start, Answer, Open, Clean, the card editor) runs on that card's machine. **+** asks which
+board's repo the new card is for; **Plan** and **Start next** run on every board. A board that can't be read (ssh
+down) keeps its last cards and shows its error in the header; the others carry on. Deploy the CLI to each machine
+with `./deploy.sh` (or point the local board at this checkout).
 
 ### Using it
 
