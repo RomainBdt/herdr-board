@@ -524,7 +524,7 @@ function startCard(board, card) {
 // Claude Code can't scope a permission to a folder, so each card worktree gets its own untracked
 // .claude/settings.local.json allowing what /ship needs (merged into any existing file).
 const SHIP_ALLOW = ['Bash(gh pr merge:*)', 'Bash(gh pr create:*)', 'Bash(gh pr edit:*)', 'Bash(gh pr checks:*)',
-  'Bash(gh label create:*)', 'Bash(git push:*)'];
+  'Bash(gh issue create:*)', 'Bash(gh label create:*)', 'Bash(git push:*)'];
 function allowShipCommands(wt) {
   try {
     const file = join(wt, '.claude', 'settings.local.json');
