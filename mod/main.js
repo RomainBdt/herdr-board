@@ -855,6 +855,15 @@ export default class HerdrBoard extends View {
     this.input.on("change", (_e, cx) => { this.title = this.input.value(); if (this.title.trim()) this.errs.title = ""; cx.notify(); });
     this.input.on("submit", (_e, cx) => this.create(cx));
     this.fields = [this.input, this.context, this.constraints, this.doneLooks];
+    if (!globalThis.__hbTabKeys) {
+      for (const context of ["NewCard > Input", "Input"]) {
+        try {
+          cx.bind_keys([{ keystroke: "tab", action: "new-card-next", context }, { keystroke: "shift-tab", action: "new-card-prev", context }]);
+          globalThis.__hbTabKeys = true;
+          break;
+        } catch { /* try the plainer context */ }
+      }
+    }
     for (const st of this.fields) st.on("focus", () => { this.focused = st; });
     this.focused = this.input;
     this.input.focus();
@@ -862,10 +871,12 @@ export default class HerdrBoard extends View {
   }
 
   // Tab / Shift+Tab: the next / previous text field, in the order they are on the screen.
-  tabField(e, cx) {
+  // The text areas bind Tab to their own indent action, which runs before any key handler, so Tab is also bound
+  // (in initNew, once) to our own actions in the Input context, where a later binding wins.
+  tabField(e, cx, back = Boolean(e?.modifiers?.shift)) {
     const order = this.fields;
     const at = order.indexOf(this.focused);
-    const to = order[(Math.max(at, 0) + (e.modifiers?.shift ? order.length - 1 : 1)) % order.length];
+    const to = order[(Math.max(at, 0) + (back ? order.length - 1 : 1)) % order.length];
     this.focused = to;
     to.focus();
     cx.stop_propagation();
@@ -942,6 +953,9 @@ export default class HerdrBoard extends View {
     const err = (text) => div().text_size(11.5).text_color(t.blocked).child(`⚠ ${text}`);
     const area = (state, h) => Textarea.new(state).h(h).flex_shrink_0().px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8);
     return v_flex().id("new").size_full().bg(t.popover).text_color(t.foreground)
+      .key_context("NewCard")
+      .on_action("new-card-next", (_e, cx) => this.tabField(null, cx, false))
+      .on_action("new-card-prev", (_e, cx) => this.tabField(null, cx, true))
       .on_key_down((e, cx) => {
         if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); }
         else if (e.key === "tab") this.tabField(e, cx);
