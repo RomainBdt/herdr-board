@@ -16,7 +16,7 @@ the repos. You can open any card's session in Herdr and type into it at any time
 1. **Where the repos are ("the server")**: create a board folder with a `board.json` (see below), then
    `./deploy.sh <machine> <folder>` copies the CLI there (`<machine>` is a name from `hc machine ls`).
 2. **Where you work (the laptop)**: `./install.sh` installs the panel and the layout into Herdr. Pick the layout
-   with `Ctrl+Shift+L`, open ⚙ on the board and set the machine, the path of `herdr-board.mjs` and the board folder.
+   with `Ctrl+Shift+L`, open ⚙ → Boards and set the machine, the path of `herdr-board.mjs` and the board folder.
 
 ## Daily use
 
@@ -74,7 +74,7 @@ shows under **needs-you** with the reason.
 {
   "name": "Payments",
   "space": "<Herdr space id on that machine: agents show up there as tabs>",
-  "hcSession": "<only for a test core; leave out on a real server>",
+  "hcSession": "<only for a separate test core; leave out normally>",
   "maxParallel": 3,
   "permissionMode": "auto",
   "plannerModel": "sonnet",
