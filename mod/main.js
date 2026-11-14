@@ -104,7 +104,7 @@ export default class HerdrBoard extends View {
   init(_props, cx) {
     const p = props() ?? {};
     if (p.dialog === "edit") return this.initEditor(cx);
-    if (p.dialog === "new") return this.initNew(cx);
+    if (p.dialog === "new" || p.dialog === "card") return this.initNew(cx);
     if (p.dialog === "answer") return this.initAnswer(cx);
     if (p.dialog === "settings") return this.initSettings(cx);
     // One entry per connection, by connKey: {data (last `ls --json`), error, loading, last, seen}.
@@ -311,10 +311,11 @@ export default class HerdrBoard extends View {
   }
 
   // Dialogs get the card's own connection (machine, script, board) in their props.
+  // Clicking a card opens the same form as New card, filled in; its fields are greyed once the card has started.
   edit(card) {
     openOverlay({
-      mod: "herdr-board", kind: "dialog", modal: true, width: 0.7, height: 0.85,
-      props: { dialog: "edit", ...card.conn, id: card.id, path: card.path, column: card.column },
+      mod: "herdr-board", kind: "dialog", modal: true, width: 640, height: 0.9,
+      props: { dialog: "card", ...card.conn, id: card.id, path: card.path, column: card.column },
     });
   }
 
@@ -420,7 +421,7 @@ export default class HerdrBoard extends View {
   render(cx) {
     const p = props() ?? {};
     if (p.dialog === "edit") return this.renderEditor(cx);
-    if (p.dialog === "new") return this.renderNew(cx);
+    if (p.dialog === "new" || p.dialog === "card") return this.renderNew(cx);
     if (p.dialog === "answer") return this.renderAnswer(cx);
     if (p.dialog === "settings") return this.renderSettings(cx);
     if (!this.active()) return div().size_full().bg(theme().chrome);   // the other slot: hidden anyway
@@ -779,7 +780,7 @@ export default class HerdrBoard extends View {
         .child(div().text_size(11).text_color(t.dim).child("Esc closes without saving")))
       .when(answering, (el) => el.child(div().px(16).py(8).text_size(12).text_color(t.blocked)
         .child("Write your answers under \"## Answers\", then Send answers. The agent continues in its session.")))
-      .child(div().flex_1().min_h(0).p(8).child(this.code ? Editor.new(this.code).size_full() : div().p(12).text_color(t.muted).child(this.msg || "Loading…")))
+      .child(div().flex_1().min_h(0).p(8).child(this.code ? Editor.new(this.code).size_full() : div().p(12).text_color(t.muted).child(this.msg ? "" : "Loading…")))
       .child(h_flex().px(16).h(52).gap(8).items_center().border_t(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.msg.startsWith("Saving") ? t.muted : t.blocked).child(this.msg))
         .when(this.msg.includes("changed since"), (el) => el.child(button("e-reload", "Reload", (cx) => this.loadCard(cx))))
@@ -839,6 +840,9 @@ export default class HerdrBoard extends View {
 
   // props.boards: [{conn, label, repos}]. Picking a repo picks its board: the card is made there.
   initNew(cx) {
+    this.existing = props().dialog === "card";   // the form of a card that already exists
+    this.locked = false;                         // true once the card has started: shown, not changeable
+    this.loaded = !this.existing;
     // With one repo in all, it is picked for you; with several, you must choose (the form says so if you don't).
     const withRepos = (props().boards ?? []).filter((x) => Object.keys(x.repos).length);
     const all = withRepos.flatMap((x) => Object.keys(x.repos));
@@ -857,7 +861,7 @@ export default class HerdrBoard extends View {
     this.doneLooks = TextareaState.new({ value: "" });
     this.input = InputState.new({ value: "" });
     this.input.on("change", (_e, cx) => { this.title = this.input.value(); if (this.title.trim()) this.errs.title = ""; cx.notify(); });
-    this.input.on("submit", (_e, cx) => this.create(cx));
+    this.input.on("submit", (_e, cx) => (this.existing ? this.saveForm(cx) : this.create(cx)));
     this.fields = [this.input, this.context, this.constraints, this.doneLooks];
     if (!globalThis.__hbTabKeys) {
       // Only inside our own dialog: the keymap is the whole app's, so a bare "Input" context would take Tab from every other input.
@@ -868,14 +872,67 @@ export default class HerdrBoard extends View {
     }
     for (const st of this.fields) st.on("focus", () => { this.focused = st; });
     this.focused = this.input;
+    if (this.existing) { this.loadForm(cx); return; }
     this.input.focus();
     cx.timer.after(400, () => { if (this.focused === this.input) this.input.focus(); });
+  }
+
+  // An existing card: fill the form from the card file.
+  loadForm(cx) {
+    const p = props();
+    cx.spawn(async (cx) => {
+      const r = await cli(p, ["show", p.id]);
+      let f = null;
+      try { f = JSON.parse(r.out); } catch { /* shown below */ }
+      if (!r.ok || !f) { this.msg = r.err || "Cannot read the card."; cx.notify(); return; }
+      this.form = f;
+      this.title = f.title;
+      this.input.set_value(f.title);
+      this.context.set_value(f.context);
+      this.constraints.set_value(f.constraints);
+      this.doneLooks.set_value(f.doneLooks);
+      this.done = f.done; this.model = f.model; this.effort = f.effort;
+      this.locked = f.status !== "todo";
+      this.loaded = true;
+      this.msg = "";
+      if (!this.locked) this.input.focus();
+      cx.notify();
+    });
+  }
+
+  // Save an existing card's changes (only a card that has not started).
+  saveForm(cx) {
+    const p = props();
+    if (this.creating || !this.loaded || this.locked) return;
+    if (!this.title.trim()) { this.errs = { title: "Write a title." }; cx.notify(); return; }
+    const fields = encodeURIComponent(JSON.stringify({
+      title: this.title.trim(), done: this.done, model: this.model, effort: this.effort,
+      context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
+    }));
+    if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it."; cx.notify(); return; }
+    this.creating = true;
+    this.msg = "Saving…";
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const r = await cli(p, ["update", p.id, "--hash", this.form.hash, "--fields", fields]);
+      if (!r.ok) { this.creating = false; this.msg = r.err; cx.notify(); return; }
+      setShared(BUMP, Date.now());
+      closeOverlay(p.overlay);
+    });
+  }
+
+  // The card as plain text (the Markdown file), for what the form does not show.
+  editText() {
+    const p = props();
+    closeOverlay(p.overlay);
+    openOverlay({ mod: "herdr-board", kind: "dialog", modal: true, width: 0.7, height: 0.85, props: { ...p, dialog: "edit", overlay: undefined } });
   }
 
   // Tab / Shift+Tab: the next / previous text field, in the order they are on the screen.
   // The text areas bind Tab to their own indent action, which runs before any key handler, so Tab is also bound
   // (in initNew, once) to our own actions in the Input context, where a later binding wins.
   tabField(e, cx, back = Boolean(e?.modifiers?.shift)) {
+    if (this.locked) { cx.stop_propagation(); return; }   // a started card's fields are not changeable: do not walk into them
     const order = this.fields;
     const at = order.indexOf(this.focused);
     const to = order[(Math.max(at, 0) + (back ? order.length - 1 : 1)) % order.length];
@@ -945,6 +1002,13 @@ export default class HerdrBoard extends View {
     });
   }
 
+  // A field of an existing card that has started: dimmed, and clicks do not reach it.
+  grey(el) {
+    if (!this.locked) return el;
+    return div().relative().opacity(0.5).child(el)
+      .child(div().absolute().top_0().left_0().size_full().on_mouse_down("left", (_e, cx) => cx.stop_propagation()));
+  }
+
   renderNew(cx) {
     const t = theme();
     const p = props();
@@ -967,7 +1031,7 @@ export default class HerdrBoard extends View {
       .child(div().text_size(11.5).font_semibold().text_color(t.muted).child(text))
       .when(Boolean(hint), (el) => el.child(div().text_size(11).text_color(t.dim).child(hint)));
     const err = (text) => div().text_size(11.5).text_color(t.blocked).child(`⚠ ${text}`);
-    const area = (state, h) => Textarea.new(state).h(h).flex_shrink_0().px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8);
+    const area = (state, h) => this.grey(Textarea.new(state).h(h).flex_shrink_0().px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8));
     return v_flex().id("new").size_full().bg(t.popover).text_color(t.foreground)
       .key_context("NewCard")
       .on_action("new-card-next", (_e, cx) => this.tabField(null, cx, false))
@@ -977,18 +1041,22 @@ export default class HerdrBoard extends View {
         else if (e.key === "tab") this.tabField(e, cx);
       })
       .child(h_flex().px(18).h(48).flex_shrink_0().items_center().border_b(1).border_color(t.border)
-        .child(div().flex_1().text_size(15).font_semibold().child("New card"))
-        .child(div().text_size(11).text_color(t.dim).child("Esc closes without creating")))
+        .child(div().flex_1().text_size(15).font_semibold().child(this.existing ? p.id : "New card"))
+        .child(div().text_size(11).text_color(t.dim).child(this.existing ? (this.locked ? "Started: read only. Esc closes" : "Esc closes without saving") : "Esc closes without creating")))
       .child(v_flex().id("new-body").flex_1().min_h(0).px(18).pb(12).gap(4).overflow_y_scrollbar()
-        .child(label("Repo"))
+        .when(this.existing && this.locked, (el) => el.child(div().pt(8).text_size(12).text_color(t.dim)
+          .child("This card has started, so its fields can no longer be changed here. Use Edit as text to add to the card file.")))
+        .when(this.existing && !this.loaded, (el) => el.child(div().pt(8).text_size(12).text_color(t.muted).child(this.msg || "Loading…")))
+        .when(this.existing, (el) => el.child(label("Repo")).child(div().text_size(12).text_color(t.muted).child(this.form?.repo ?? "")))
+        .when(!this.existing, (el) => el.child(label("Repo")))
         // with several boards, their repos are grouped under each board's name
-        .children(boards.length > 1
+        .children(this.existing ? [] : boards.length > 1
           ? boards.map((bd, bi) => v_flex().gap(4).child(div().text_size(11).font_semibold().text_color(t.muted).child(bd.label)).child(repoChips(bd, bi)))
           : boards.map(repoChips))
-        .when(!boards.length, (el) => el.child(div().text_size(12).text_color(t.blocked).child("No board could be read yet. Check ⚙ → Boards.")))
+        .when(!this.existing && !boards.length, (el) => el.child(div().text_size(12).text_color(t.blocked).child("No board could be read yet. Check ⚙ → Boards.")))
         .when(Boolean(this.errs.repo), (el) => el.child(err(this.errs.repo)))
         .child(label("Title"))
-        .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(this.errs.title ? t.blocked : t.input).bg(t.background).text_size(12.8))
+        .child(this.grey(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(this.errs.title ? t.blocked : t.input).bg(t.background).text_size(12.8)))
         .when(Boolean(this.errs.title), (el) => el.child(err(this.errs.title)))
         .child(label("Context", "Why it matters, what you know, links, files to look at"))
         .child(area(this.context, 110))
@@ -997,17 +1065,19 @@ export default class HerdrBoard extends View {
         .child(label("Done looks like", "What you will check to call it done"))
         .child(area(this.doneLooks, 70))
         .child(label("Finish with", "How far the agent takes it"))
-        .child(chip("done", FINISH_WITH,
-          this.done, (v) => { this.done = v; }))
+        .child(this.grey(chip("done", FINISH_WITH,
+          this.done, (v) => { this.done = v; })))
         .child(label("Model", "Auto: the planner proposes"))
-        .child(chip("model", [["", "Auto"], ["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], this.model, (v) => { this.model = v; }))
+        .child(this.grey(chip("model", [["", "Auto"], ["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], this.model, (v) => { this.model = v; })))
         .child(label("Effort", "Auto: the planner proposes"))
-        .child(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; })))
+        .child(this.grey(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; }))))
       .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
-        .child(button("n-cancel", "Cancel", () => closeOverlay(p.overlay)))
-        .child(button("n-help", "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields" }))
-        .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true }))
-        .child(button("n-start", "Create and start", (cx) => this.create(cx, true), { primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" })));
+        .child(button("n-cancel", this.existing && this.locked ? "Close" : "Cancel", () => closeOverlay(p.overlay)))
+        .when(this.existing, (el) => el.child(button("n-text", "Edit as text", () => this.editText(), { tip: "Open the card's Markdown file" }))
+          .when(!this.locked && this.loaded, (e2) => e2.child(button("n-save", "Save", (cx) => this.saveForm(cx), { primary: true }))))
+        .when(!this.existing, (el) => el.child(button("n-help", "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields" }))
+          .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true }))
+          .child(button("n-start", "Create and start", (cx) => this.create(cx, true), { primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" }))));
   }
 }

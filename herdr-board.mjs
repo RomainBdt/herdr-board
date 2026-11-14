@@ -4,7 +4,7 @@
 // No packages: Node's standard library only.
 //
 //   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | plan | approve <id> [--model m] [--effort e] | unapprove <id> | next | start <id>
-//           answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
+//           show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] "<summary>"
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
@@ -762,6 +762,48 @@ function cmdSave(board, [id, encoded, expected]) {
   console.log(`${id.toUpperCase()}: saved`);
 }
 
+// The card's form fields as JSON (the panel's card form), with the hash of the file to save against.
+const PLACEHOLDERS = { 'Context': /^Why this matters, what you know/, 'Constraints': /^- What the agent must not do/, 'Done looks like': /^- What you will check/ };
+function cmdShow(board, [id]) {
+  if (!id) die('usage: show <id>');
+  const card = loadCard(board, id);
+  const text = (name) => { const b = (section(card, name)?.body || '').trim(); return PLACEHOLDERS[name].test(b) ? '' : b; };
+  console.log(JSON.stringify({
+    id: card.id, title: card.meta.title || '', repo: card.meta.repo || '', status: card.meta.status || 'todo',
+    done: card.meta.done || '', model: card.meta.model || '', effort: card.meta.effort || '',
+    context: text('Context'), constraints: text('Constraints'), doneLooks: text('Done looks like'),
+    hash: textHash(readFileSync(card.path, 'utf8')),
+  }));
+}
+
+// Change a card that has not started: title, finish-with, model, effort and the three text sections.
+function cmdUpdate(board, args) {
+  const hash = takeFlag(args, '--hash');
+  const fields = takeFlag(args, '--fields');
+  const [id] = args;
+  if (!id || !fields || !hash) die('usage: update <id> --hash <h> --fields <enc>');
+  const card = loadCard(board, id);
+  if (textHash(readFileSync(card.path, 'utf8')) !== hash) die('the card changed since you opened it (an agent may have updated it). Close the panel and open it again.');
+  if ((card.meta.status || 'todo') !== 'todo') die(`${card.id} has started: it can no longer be changed from the form`);
+  let f;
+  try { f = JSON.parse(decodeURIComponent(fields)); } catch { die('--fields is not valid encoded JSON'); }
+  if (f.model && !MODELS.includes(f.model)) die(`model must be one of ${MODELS.join(', ')}`);
+  if (f.effort && !EFFORTS.includes(f.effort)) die(`effort must be one of ${EFFORTS.join(', ')}`);
+  const one = (v) => String(v ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const title = one(f.title);
+  if (!title) die('the title cannot be empty');
+  card.meta.title = title;
+  card.meta.done = one(f.done) || card.meta.done;
+  card.meta.model = one(f.model);
+  card.meta.effort = one(f.effort);
+  setSection(card, 'Context', String(f.context ?? '').trim());
+  setSection(card, 'Constraints', String(f.constraints ?? '').trim());
+  setSection(card, 'Done looks like', String(f.doneLooks ?? '').trim());
+  card.meta.updated = now();
+  saveCard(card);
+  console.log(`${card.id}: updated`);
+}
+
 // The panel's settings that belong to the board itself:
 // config maxParallel 3 | config plannerModel opus | config autoStart on|off | config autoInterval 5 (minutes)
 function cmdConfig(board, [key, value]) {
@@ -898,7 +940,7 @@ const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD ||
 const [cmd, ...rest] = argv;
 const commands = {
   new: cmdNew, draft: cmdDraft, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
-  answer: cmdAnswer, clean: cmdClean, save: cmdSave, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+  answer: cmdAnswer, clean: cmdClean, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
 };
 if (!cmd || !commands[cmd]) {
   console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
