@@ -508,7 +508,7 @@ function cmdLs(board, args) {
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
-      done: c.meta.done || '', outcome: c.meta.status === 'done' ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
+      done: c.meta.done || '', outcome: ['done', 'archived'].includes(c.meta.status) ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
       approved: c.meta.approved === 'true',
       where: whereOf(c), questions: questionsOf(c),
       prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
@@ -539,9 +539,16 @@ function cmdLs(board, args) {
   }
 }
 
+// A late command from an agent must not revive a cleaned card.
+function loadLive(board, id) {
+  const card = loadCard(board, id);
+  if (card.meta.status === 'archived') die(`${card.id} is archived: nothing to change`);
+  return card;
+}
+
 function cmdWhere(board, [id, goal, done, next]) {
   if (!id || next === undefined) die('usage: where <id> "<goal>" "<done>" "<next>"');
-  const card = loadCard(board, id);
+  const card = loadLive(board, id);
   setSection(card, 'Where we are', `- Goal: ${goal}\n- Done: ${done}\n- Next: ${next}`);
   card.meta.updated = now();
   saveCard(card);
@@ -550,7 +557,7 @@ function cmdWhere(board, [id, goal, done, next]) {
 
 function cmdAsk(board, [id, ...qs]) {
   if (!id || !qs.length) die('usage: ask <id> "<question 1>" ["<question 2>" ...]');
-  const card = loadCard(board, id);
+  const card = loadLive(board, id);
   // an earlier round of questions and answers moves to History, so the card shows only the open ones
   const oldQ = section(card, 'Questions')?.body || '';
   if (oldQ.trim()) {
@@ -573,7 +580,7 @@ function cmdAnswer(board, args) {
   let [id, ...text] = args;
   if (uri !== undefined) text = [decodeURIComponent(uri)];
   if (!id) die('usage: answer <id> ["<answer text>"]   (or write them in the card under ## Answers first)');
-  const card = loadCard(board, id);
+  const card = loadLive(board, id);
   if (text.length) {
     const prev = answersOf(card);
     setSection(card, 'Answers', `${prev}\n\n_${now()}_\n${text.join(' ')}`.trim());
@@ -605,7 +612,7 @@ function cmdDone(board, args) {
   const [id, ...summary] = args;
   if (!id || !summary.length) die(`usage: done <id> [--state ${OUTCOMES.join('|')}] [--pr <url>] "<summary>"`);
   if (!OUTCOMES.includes(state)) die(`--state must be one of ${OUTCOMES.join(', ')}`);
-  const card = loadCard(board, id);
+  const card = loadLive(board, id);
   card.meta.outcome = state;
   setSection(card, 'Result', `_${now()}_\n\n${summary.join(' ')}${pr ? `\n\nPull request: ${pr}` : ''}`);
   delete card.meta.reopened_outcome;   // an explicit `done` replaces the outcome remembered by a reopen
@@ -631,6 +638,7 @@ function cmdApprove(board, args) {
   if (!MODELS.includes(card.meta.model)) die(`model must be one of ${MODELS.join(', ')}`);
   if (!EFFORTS.includes(card.meta.effort)) die(`effort must be one of ${EFFORTS.join(', ')}`);
   card.meta.approved = 'true';
+  delete card.meta.start_error;   // approving again is the "try again"
   if ((card.meta.status || 'todo') === 'todo') card.meta.status = 'ready';
   saveCard(card);
   console.log(`${card.id}: ready (${card.meta.model}/${card.meta.effort})`);
@@ -652,6 +660,7 @@ function cmdUnapprove(board, args) {
 // Cards that may start, best first: ready ones, and todo ones pre-approved on the card.
 function queue(board) {
   return allCards(board)
+    .filter(c => !c.meta.start_error)   // a card that failed to start waits for a person (approve or start clears it), not the next tick
     .filter(c => c.meta.status === 'ready' || ((c.meta.status || 'todo') === 'todo' && c.meta.approved === 'true'))
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
@@ -975,9 +984,13 @@ function retryBusy(fn) {
 
 // Clean: always stops the agent; then, as the board's "clean" settings say (config cleanWorktree|cleanBranch|cleanArchive):
 // removes the worktree, deletes the branch, moves the card to archived.
-function cmdClean(board, [id]) {
-  if (!id) die('usage: clean <id>   (stops its agent; removes the worktree, deletes the branch and archives the card as the board settings say)');
+function cmdClean(board, args) {
+  const force = args.includes('--force');
+  if (force) args.splice(args.indexOf('--force'), 1);
+  const [id] = args;
+  if (!id) die('usage: clean <id> [--force]   (stops its agent; removes the worktree, deletes the branch and archives the card as the board settings say)');
   const card = loadCard(board, id);
+  if (card.meta.status !== 'done' && !force) die(`${card.id} is ${card.meta.status || 'todo'}: only a done card can be cleaned (--force to clean it anyway)`);
   const opt = board.clean;
   const name = termName(card.id);
   const repo = board.repos[card.meta.repo];
