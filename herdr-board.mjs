@@ -15,7 +15,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const STATUSES = ['todo', 'ready', 'running', 'needs-you', 'done'];
+const STATUSES = ['todo', 'ready', 'running', 'needs-you', 'done', 'archived'];
+const CLEAN_KEYS = { worktree: 'cleanWorktree', branch: 'cleanBranch', archive: 'cleanArchive' };   // what Clean does, each on/off
 const MODELS = ['haiku', 'sonnet', 'opus'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -57,6 +58,7 @@ function loadBoard(dir) {
   b.maxParallel ??= 2;
   b.repos ??= {};
   b.autoStart = { enabled: b.autoStart?.enabled === true, intervalMinutes: autoInterval(b.autoStart?.intervalMinutes) };
+  b.clean = { worktree: true, branch: true, archive: true, ...(b.clean || {}) };
   if (!b.worktrees) die('board.json needs "worktrees": the folder where card worktrees go');
   return b;
 }
@@ -263,7 +265,7 @@ function cmdLs(board, args) {
   const running = cards.filter(c => c.column === 'running').length;   // same rule as the queue's free slots
   if (args.includes('--json')) {
     const repos = Object.fromEntries(Object.entries(board.repos).map(([k, r]) => [k, r.color || '#888888']));
-    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, plannerModel: board.plannerModel || 'sonnet', autoStart: board.autoStart, running, repos, cards }, null, 2));
+    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, plannerModel: board.plannerModel || 'sonnet', autoStart: board.autoStart, clean: board.clean, running, repos, cards }, null, 2));
     return;
   }
   console.log(`${board.name || 'board'}: ${running}/${board.maxParallel} running`);
@@ -493,7 +495,7 @@ function renderRules(board, card) {
 function cmdStart(board, [id]) {
   if (!id) die('usage: start <id>');
   const card = loadCard(board, id);
-  if (card.meta.status === 'done') die(`${card.id} is done`);
+  if (['done', 'archived'].includes(card.meta.status)) die(`${card.id} is ${card.meta.status}`);
   startCard(board, card);
   console.log(`${card.id}: started as ${termName(card.id)}`);
 }
@@ -598,24 +600,54 @@ function cmdConfig(board, [key, value]) {
     const n = Number(value);
     if (!Number.isInteger(n) || n < 1 || n > 1440) die('autoInterval must be a whole number of minutes, 1 to 1440');
     raw.autoStart = { ...raw.autoStart, intervalMinutes: n };
-  } else die('usage: config maxParallel <1-10> | plannerModel <haiku|sonnet|opus> | autoStart <on|off> | autoInterval <minutes>');
+  } else if (Object.values(CLEAN_KEYS).includes(key)) {
+    if (!['on', 'off'].includes(value)) die(`${key} must be on or off`);
+    const part = Object.keys(CLEAN_KEYS).find(k => CLEAN_KEYS[k] === key);
+  } else die('usage: config maxParallel <1-10> | plannerModel <haiku|sonnet|opus> | autoStart <on|off> | autoInterval <minutes> | cleanWorktree|cleanBranch|cleanArchive <on|off>');
   writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
-  console.log(`${key} = ${key === 'autoStart' || key === 'autoInterval' ? value : raw[key]}`);
+  console.log(`${key} = ${['autoStart', 'autoInterval', ...Object.values(CLEAN_KEYS)].includes(key) ? value : raw[key]}`);
   if (key === 'maxParallel') startNext(loadBoard(board.dir), { quiet: true });   // more room: start what waits
 }
 
+// Clean: always stops the agent; then, as the board's "clean" settings say (config cleanWorktree|cleanBranch|cleanArchive):
+// removes the worktree, deletes the branch, moves the card to archived.
 function cmdClean(board, [id]) {
-  if (!id) die('usage: clean <id>   (stops its agent and removes its worktree; keeps the branch)');
+  if (!id) die('usage: clean <id>   (stops its agent; removes the worktree, deletes the branch and archives the card as the board settings say)');
   const card = loadCard(board, id);
+  const opt = board.clean;
   const name = termName(card.id);
+  const repo = board.repos[card.meta.repo];
+  const branch = card.meta.branch || `card/${card.id}`;
+  const did = ['agent stopped'];
   hc(board, ['kill', name], { json: false, allowFail: true });
   hc(board, ['rm', name], { json: false, allowFail: true });
-  const repo = board.repos[card.meta.repo];
-  if (card.meta.worktree && existsSync(card.meta.worktree)) {
+  if (opt.worktree && card.meta.worktree && existsSync(card.meta.worktree)) {
     try { git(['-C', repo.path, 'worktree', 'remove', card.meta.worktree]); }
     catch (e) { die(`${card.id}: worktree has uncommitted changes, left in place: ${card.meta.worktree}`); }
+    did.push('worktree removed');
   }
-  console.log(`${card.id}: agent stopped, worktree removed (branch ${card.meta.branch || 'card/' + card.id} kept)`);
+  let note = '';
+  if (opt.branch && repo) {
+    let exists = true;
+    try { git(['-C', repo.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]); } catch { exists = false; }
+    if (exists) {
+      try { git(['-C', repo.path, 'branch', '-d', branch]); did.push(`branch ${branch} deleted`); }
+      catch (e) {
+        // not merged into the checked-out branch (a PR merged on GitHub leaves local main behind): still safe when a remote has it
+        let remote = '';
+        try { remote = git(['-C', repo.path, 'branch', '-r', '--contains', branch]); } catch { /* none */ }
+        if (remote) { git(['-C', repo.path, 'branch', '-D', branch]); did.push(`branch ${branch} deleted`); }
+        else note = `branch ${branch} kept: it has commits that are neither merged nor on a remote (git branch -D ${branch} to force)`;
+      }
+    }
+  }
+  if (opt.archive) {
+    card.meta.status = 'archived';
+    card.meta.updated = now();
+    saveCard(card);
+    did.push('card archived');
+  }
+  console.log(`${card.id}: ${did.join(', ')}${note ? '. ' + note : ''}`);
 }
 
 // ---------- main ----------

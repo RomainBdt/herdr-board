@@ -38,7 +38,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | timer | `tick` | `next`, but only if `autoStart` is on and its interval has passed (the panel calls it every 30 s) |
 | you | `answer <id> ["text"]` | send your answers to the live session |
 | you | `ls [--json]` | the board; `--json` is what the Herdr panel reads |
-| you | `clean <id>` | stop its agent, remove its worktree (keeps the branch) |
+| you | `clean <id>` | stop its agent, then as the board's Clean settings say: remove its worktree, delete its branch, move the card to `archived` (all on by default; set with `config cleanWorktree`, `cleanBranch`, `cleanArchive` `on`/`off`) |
 | agent | `where` / `ask` / `done` | update its own card; never edits the file directly |
 
 `ls` also checks each running agent: a terminal that is gone, blocked on a prompt, or stopped without `ask`/`done`
@@ -132,7 +132,7 @@ it from the keyboard (not Ctrl+B: Claude Code uses it).
 | Refresh every | 5 s, 15 s, 1 min |
 | Alerts | toast + sound when a card needs you; when one is done (off by default: Herdr already tells you) |
 | Auto-start / Auto-start every | per board, saved in its `board.json`: on or off, and 1, 5, 10, 15, 30 or 60 minutes |
-| Boards | one or more: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once and Planner model (saved in that board's `board.json` with `herdr-board config ...`) |
+| Boards | one or more: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once, Planner model and Clean button behavior (saved in that board's `board.json` with `herdr-board config ...`) |
 
 Display and connection settings are kept in Herdr's shared state (`herdr-board.settings`).
 
