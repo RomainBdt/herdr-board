@@ -14,7 +14,9 @@ const COLUMNS = [
 const FINISH_WITH = [["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]];
 const REACHED = Object.fromEntries(FINISH_WITH);
 // one color per reached state, so the Done tags are told apart at a glance
-const REACHED_COLOR = { local: "#7aa2f7", "local-reviewed": "#2ac3de", "draft-pr": "#bb9af7", "pr-ready": "#e0af68", merged: "#4ade80" };
+const REACHED_COLOR = { local: "#e5b92e", "local-reviewed": "#a6c93a", "draft-pr": "#5cc86a", "pr-ready": "#22b8a0", merged: "#15a34a" };
+// the other tags: Done (target in plain words) blue, Blocked orange, Not reached red; none shares a color with another tag
+const TAG_COLOR = { done: "#7b93e0", blocked: "#f97316", missed: "#ef4444" };
 const BUMP ="herdr-board.bump";     // dialogs set it after a change so the board refreshes at once
 
 // same as textHash in herdr-board.mjs: the editor sends it back so a card an agent changed isn't overwritten
@@ -389,9 +391,9 @@ export default class HerdrBoard extends View {
     // Done tag: the Finish-with state reached; "Not reached" when the target was missed; "Blocked" when it cannot continue.
     const out = c.outcome || "reached";
     const tag = c.column !== "done" ? null
-      : out === "reached" ? ["✓ " + (REACHED[c.done] || "Done"), REACHED_COLOR[c.done] || t.working]
-      : out === "blocked" ? ["⛔ Blocked", t.blocked]
-      : ["✗ Not reached" + (REACHED[c.done] ? `: ${REACHED[c.done]}` : ""), out === "abandoned" ? t.dim : t.blocked];
+      : out === "reached" ? ["✓ " + (REACHED[c.done] || "Done"), REACHED_COLOR[c.done] || TAG_COLOR.done]
+      : out === "blocked" ? ["⛔ Blocked", TAG_COLOR.blocked]
+      : ["✗ Not reached" + (REACHED[c.done] ? `: ${REACHED[c.done]}` : ""), TAG_COLOR.missed];
     return h_flex().id(`card-${c.uid}`).w_full().rounded(8).overflow_hidden().flex_shrink_0()
       .bg(t.background).border_1().border_color(c.column === "needs-you" ? t.blocked : t.border)
       .cursor_pointer().hover((s) => s.border_color(t.input))
