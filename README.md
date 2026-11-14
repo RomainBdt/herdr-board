@@ -319,7 +319,8 @@ check: PASS
 - It leaves nothing behind: it starts **its own** sshd on a free port with no window, and stops it and every ssh
   session when it ends (even on Ctrl+C). An sshd that is already running is neither used nor stopped. It never touches
   `~/.ssh/config` and does not use the `fakeserver` alias, so Herdr does not see it and does not open (or reopen) an
-  empty cmd.exe window.
+  empty cmd.exe window. On Windows, sshd gives the remote command's `cmd.exe` a console that Windows Terminal would show as
+  a window; `check-hide.ps1` (run hidden for the remote side only) hides it the moment it appears.
 - Only the fake machine is used, never a real remote one.
 
 ## Licenses and notices

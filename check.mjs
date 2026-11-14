@@ -21,7 +21,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, connect } from 'node:net';
 import { homedir, tmpdir, userInfo } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const WIN = process.platform === 'win32';
 const slash = p => p.replace(/\\/g, '/');
@@ -127,9 +128,10 @@ async function remoteCheck(dir, cmd) {
     return run(prog, [...pre, remote]);
   }
   let box;
+  const hider = startHider();
   try { box = await startFakeSshd(); }
-  catch (e) { return { ok: false, ms: 0, output: e.message }; }
-  const stopOnSignal = () => { box.stop(); process.exit(130); };
+  catch (e) { stopHider(hider); return { ok: false, ms: 0, output: e.message }; }
+  const stopOnSignal = () => { box.stop(); stopHider(hider); process.exit(130); };
   process.once('SIGINT', stopOnSignal); process.once('SIGTERM', stopOnSignal);
   try {
     const sshExe = WIN ? slash(join(process.env.SystemRoot || 'C:/Windows', 'System32/OpenSSH/ssh.exe')) : 'ssh';
@@ -140,8 +142,20 @@ async function remoteCheck(dir, cmd) {
     return run(sshExe, args);
   } finally {
     box.stop();
+    stopHider(hider);
     process.removeListener('SIGINT', stopOnSignal); process.removeListener('SIGTERM', stopOnSignal);
   }
+}
+
+// On Windows, sshd gives the remote command's cmd.exe a console that Windows Terminal shows as a window; see check-hide.ps1.
+function startHider() {
+  if (!WIN) return null;
+  const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dirname(fileURLToPath(import.meta.url)), 'check-hide.ps1')], { stdio: 'ignore', windowsHide: true });
+  p.once('error', () => {});
+  return p;
+}
+function stopHider(p) {
+  if (p?.pid) spawnSync('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
 }
 
 // ---- main ----------------------------------------------------------------------------------------------------------
