@@ -12,6 +12,7 @@ herdr-board/                 this code, copied by ./deploy.sh
   herdr-board.mjs            the CLI (Node, no packages)
   rules.md                   what every card agent is told (autonomy, questions, done targets)
   card-template.md           a new card
+  draft-rules.md             what the "Create with agent" chat is told
 ```
 
 ## Flow

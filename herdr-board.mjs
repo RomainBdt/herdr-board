@@ -3,7 +3,7 @@
 // hc terminal in its own git worktree. Runs on the machine that holds the repos (the "server").
 // No packages: Node's standard library only.
 //
-//   you:    new <repo> "<title>" | plan | approve <id> [--model m] [--effort e] | next | start <id>
+//   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | plan | approve <id> [--model m] [--effort e] | next | start <id>
 //           answer <id> ["<text>"] | ls [--json] | clean <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> "<summary>"
 //
@@ -210,7 +210,9 @@ function applyFields(tpl, f) {
 }
 
 function cmdNew(board, args) {
-  const fields = takeFlag(args, '--fields');   // encodeURIComponent(JSON) from the panel's form
+  let fields = takeFlag(args, '--fields');   // encodeURIComponent(JSON) from the panel's form
+  const file = takeFlag(args, '--fields-file');   // or a JSON file (what the card-drafting agent writes)
+  if (file) { try { fields = encodeURIComponent(readFileSync(file, 'utf8')); } catch { die(`cannot read ${file}`); } }
   const [repo, ...titleWords] = args;
   const title = titleWords.join(' ').trim();
   if (!repo || !title) die('usage: new <repo> "<title>"');
@@ -495,6 +497,35 @@ function cmdStart(board, [id]) {
   console.log(`${card.id}: started as ${termName(card.id)}`);
 }
 
+// "Create with agent": a chat agent that asks the person what is missing, then writes the card with `new`.
+function cmdDraft(board, args) {
+  const fields = takeFlag(args, '--fields');
+  const [repo, ...titleWords] = args;
+  const title = titleWords.join(' ').trim();
+  const r = board.repos[repo];
+  if (!r) die(`unknown repo "${repo}"; board.json knows: ${Object.keys(board.repos).join(', ')}`);
+  let f = {};
+  if (fields) { try { f = JSON.parse(decodeURIComponent(fields)); } catch { die('--fields is not valid encoded JSON'); } }
+  const dir = join(board.dir, '.rules');
+  mkdirSync(dir, { recursive: true });
+  const name = `draft-${Date.now().toString(36)}`;
+  const me = `node "${slash(join(HERE, 'herdr-board.mjs'))}" --board "${slash(board.dir)}"`;
+  const rules = join(dir, `${name}.md`);
+  writeAtomic(rules, readFileSync(join(HERE, 'draft-rules.md'), 'utf8')
+    .replaceAll('{{board}}', me).replaceAll('{{repo}}', repo).replaceAll('{{file}}', slash(join(dir, `${name}.json`))));
+  const given = [['title', title], ['context', f.context], ['constraints', f.constraints], ['done looks like', f.doneLooks],
+    ['finish with', f.done], ['model', f.model], ['effort', f.effort]].filter(([, v]) => String(v ?? '').trim())
+    .map(([k, v]) => `- ${k}: ${String(v).trim()}`).join('\n') || '(nothing yet)';
+  const brief = `Help me create a card on the "${repo}" board. What I wrote so far:\n${given}\nAsk me what is missing, then create the card.`;
+  const args2 = ['run', '--bg', '--no-parent', '--outlive-parent', '--name', name, '--cwd', slash(r.path), '--label', 'draft=1'];
+  if (board.space) args2.push('--label', `herdr.space=${board.space}`);
+  args2.push('--', 'claude', '--model', board.plannerModel || 'sonnet', '--permission-mode', board.permissionMode || 'auto',
+    '-n', `New card: ${title || repo}`.slice(0, 60), '--append-system-prompt-file', slash(rules), brief);
+  hc(board, args2);
+  acceptTrustPrompt(board, name);
+  console.log(name);
+}
+
 function cmdPlan(board, args) {
   const model = takeFlag(args, '--model') || board.plannerModel || 'sonnet';
   const cards = allCards(board).filter(c => ['todo', 'ready'].includes(c.meta.status || 'todo'));
@@ -592,7 +623,7 @@ const argv = process.argv.slice(2);
 const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD || join(HERE, '..', 'board'));
 const [cmd, ...rest] = argv;
 const commands = {
-  new: cmdNew, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, next: (b) => startNext(b), start: cmdStart,
+  new: cmdNew, draft: cmdDraft, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, next: (b) => startNext(b), start: cmdStart,
   answer: cmdAnswer, clean: cmdClean, save: cmdSave, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
 };
 if (!cmd || !commands[cmd]) {
