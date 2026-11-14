@@ -138,7 +138,7 @@ export default class HerdrBoard extends View {
           const r = await cli(c, ["tick"], 180000);
           src.ticking = false;
           const failed = !r.ok ? r.err : /auto-start failed/.test(r.out) ? r.out : "";   // the CLI reports a failed run on stdout
-          if (failed && !src.tickFailed) notify({ title: `Auto-start failed${this.boards().length > 1 ? ` on ${machineName(c)}` : ""}`, body: failed.slice(0, 300), level: "error" });
+          if (failed && !src.tickFailed) notify({ title: `Auto-start failed${this.boards().length > 1 ? ` on ${machineName(c)}` : ""}`, body: failed.replace(/\s+/g, " ").slice(0, 700), level: "error" });
           src.tickFailed = Boolean(failed);   // once per failing stretch, not every 30 s
           if (r.ok && /started:/.test(r.out)) this.refreshOne(cx, c);
         });
@@ -275,7 +275,7 @@ export default class HerdrBoard extends View {
     cx.spawn(async (cx) => {
       const r = await cli(conn, args, timeout);
       end();
-      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed`, body: r.err.slice(0, 300), level: "error" });
+      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed`, body: r.err.replace(/\s+/g, " ").slice(0, 700), level: "error" });
       this.refreshOne(cx, conn);
       cx.notify();
     });
@@ -294,7 +294,7 @@ export default class HerdrBoard extends View {
     let left = list.length;
     for (const b of list) cx.spawn(async (cx) => {
       const r = await cli(b.conn, args, timeout);
-      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed${all.length > 1 ? ` on ${b.label}` : ""}`, body: r.err.slice(0, 300), level: "error" });
+      if (!r.ok) notify({ title: `${label.replace(/…$/, "")} failed${all.length > 1 ? ` on ${b.label}` : ""}`, body: r.err.replace(/\s+/g, " ").slice(0, 700), level: "error" });
       if (--left === 0) end();
       this.refreshOne(cx, b.conn);
       cx.notify();
