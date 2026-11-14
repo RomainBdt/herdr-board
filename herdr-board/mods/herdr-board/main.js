@@ -1013,129 +1013,14 @@ export default class HerdrBoard extends View {
         if (!r.ok) { this.creating = false; this.busy = ""; this.msg = r.err; cx.notify(); return; }
         id = this.created = String(r.out).trim().split(/\s+/)[0];
       }
-      if (startNow) {
-        const s = await cli(c, ["start", id], 90000);
-        // an auto-start tick may have started the (approved) card between `new` and `start`: that is a success
-        if (!s.ok && !/already running/.test(s.err)) {
-          // the card exists and is approved: it will start when a slot is free, or press Create and start again
-          setShared(BUMP, Date.now());
-          this.creating = false; this.busy = ""; this.msg = `${id} was created but did not start: ${s.err}`; cx.notify(); return;
-        }
-      }
-      setShared(BUMP, Date.now());
-      closeOverlay(p.overlay);
-    });
-  }
-
-  // "Create with agent": a chat agent asks what is missing and writes the card. The form's text goes with it.
-  help(cx) {
-    const p = props();
-    if (this.creating) return;
-    if (!this.pick) { this.errs = { ...this.errs, repo: "Pick a repo." }; this.msg = ""; cx.notify(); return; }
-    const fields = encodeURIComponent(JSON.stringify({
-      done: this.done, model: this.model, effort: this.effort,
-      context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
-    }));
-    if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it first."; cx.notify(); return; }
-    this.creating = true;
-    this.busy = "help";
-    this.msg = "Starting the agent…";
-    cx.notify();
-    cx.spawn(async (cx) => {
-      const c = p.boards[this.pick.b].conn;
-      const r = await cli(c, ["draft", this.pick.repo, this.title.trim(), "--fields", fields], 90000);
-      if (!r.ok) { this.creating = false; this.busy = ""; this.msg = r.err; cx.notify(); return; }
-      closeOverlay(p.overlay);
-      try { run("agent.focus", { terminal: c.machine ? `${c.machine}/${r.out}` : r.out }); } catch { /* the agent is in Herdr anyway */ }
-    });
-  }
-
-  // A field of an existing card that has started: dimmed, and clicks do not reach it.
-  grey(el) {
-    if (!this.locked) return el;
-    return div().relative().opacity(0.5).child(el)
-      .child(div().absolute().top_0().left_0().size_full().on_mouse_down("left", (_e, cx) => cx.stop_propagation()));
-  }
-
-  renderNew(cx) {
-    const t = theme();
-    const p = props();
-    const boards = p.boards ?? [];
-    const repoChips = (bd, bi) => h_flex().gap(6).flex_wrap().children(Object.entries(bd.repos).map(([name, color]) => {
-      const on = this.pick?.b === bi && this.pick.repo === name;
-      return h_flex().id(`repo-${bi}-${safeId(name)}`).h(26).px(10).gap(6).items_center().rounded(7).cursor_pointer()
-        .border_1().border_color(on ? color : t.border).bg(on ? t.selected : t.raised)
-        .on_click((_e, cx) => { this.pick = { b: bi, repo: name }; this.errs.repo = ""; cx.notify(); })
-        .child(div().w(8).h(8).rounded_full().bg(color)).child(div().text_size(12).child(name));
-    }));
-    const chip = (id, options, current, pick) => h_flex().gap(4).flex_wrap().children(options.map(([v, label, color]) =>
-      h_flex().id(`${id}-${v}`).h(26).px(10).gap(6).items_center().rounded(7).cursor_pointer().text_size(12)
-        .border_1().border_color(current === v ? (color ?? t.accent) : t.border).bg(current === v ? t.selected : t.raised)
-        .text_color(current === v ? t.foreground : t.muted)
-        .on_click((_e, cx) => { pick(v); cx.notify(); })
-        .when(Boolean(color), (el) => el.child(div().w(8).h(8).rounded_full().bg(color)))
-        .child(label)));
-    const label = (text, hint) => h_flex().gap(8).items_center().pt(8)
-      .child(div().text_size(11.5).font_semibold().text_color(t.muted).child(text))
-      .when(Boolean(hint), (el) => el.child(div().text_size(11).text_color(t.dim).child(hint)));
-    const err = (text) => div().text_size(11.5).text_color(t.blocked).child(`⚠ ${text}`);
-    const area = (state, h) => this.grey(Textarea.new(state).h(h).flex_shrink_0().px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8));
-    return v_flex().id("new").size_full().bg(t.popover).text_color(t.foreground)
-      .key_context("NewCard")
-      .on_action("new-card-next", (_e, cx) => this.tabField(null, cx, false))
-      .on_action("new-card-prev", (_e, cx) => this.tabField(null, cx, true))
-      .on_key_down((e, cx) => {
-        if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); }
-        else if (e.key === "tab") this.tabField(e, cx);
-      })
-      .child(h_flex().px(18).h(48).flex_shrink_0().items_center().border_b(1).border_color(t.border)
-        .child(div().flex_1().text_size(15).font_semibold().child(this.existing ? p.id : "New card"))
-        .child(div().text_size(11).text_color(t.dim).child(this.existing ? (this.locked ? "Started: read only. Esc closes" : "Esc closes without saving") : "Esc closes without creating")))
-      .child(v_flex().id("new-body").flex_1().min_h(0).px(18).pb(12).gap(4).overflow_y_scrollbar()
-        .when(this.existing && this.locked, (el) => el.child(div().pt(8).text_size(12).text_color(t.dim)
-          .child("This card has started, so its fields can no longer be changed here. Use Edit as text to add to the card file.")))
-        .when(this.existing && !this.loaded, (el) => el.child(div().pt(8).text_size(12).text_color(t.muted).child(this.msg || "Loading…")))
-        .when(this.existing, (el) => el.child(label("Repo")).child(div().text_size(12).text_color(t.muted).child(this.form?.repo ?? "")))
-        .when(!this.existing, (el) => el.child(label("Repo")))
-        // with several boards, their repos are grouped under each board's name
-        .children(this.existing ? [] : boards.length > 1
-          ? boards.map((bd, bi) => v_flex().gap(4).child(div().text_size(11).font_semibold().text_color(t.muted).child(bd.label)).child(repoChips(bd, bi)))
-          : boards.map(repoChips))
-        .when(!this.existing && !boards.length, (el) => el.child(div().text_size(12).text_color(t.blocked).child("No board could be read yet. Check ⚙ → Boards.")))
-        .when(Boolean(this.errs.repo), (el) => el.child(err(this.errs.repo)))
-        .child(label("Title"))
-        .child(this.grey(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(this.errs.title ? t.blocked : t.input).bg(t.background).text_size(12.8)))
-        .when(Boolean(this.errs.title), (el) => el.child(err(this.errs.title)))
-        .child(label("Context", "Why it matters, what you know, links, files to look at"))
-        .child(area(this.context, 110))
-        .child(label("Constraints", "What the agent must not do or change"))
-        .child(area(this.constraints, 70))
-        .child(label("Done looks like", "What you will check to call it done"))
-        .child(area(this.doneLooks, 70))
-        .child(label("Finish with", "How far the agent takes it"))
-        .child(this.grey(chip("done", FINISH_WITH,
-          this.done, (v) => { this.done = v; })))
-        .child(label("Model", "Auto: Haiku picks on approve"))
-        .child(this.grey(chip("model", [["", "Auto"], ["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"]], this.model, (v) => { this.model = v; })))
-        .child(label("Effort", "Auto: Haiku picks on approve"))
-        .child(this.grey(chip("effort", [["", "Auto"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]], this.effort, (v) => { this.effort = v; }))))
-      .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
-        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
-        .child(button("n-cancel", this.existing && this.locked ? "Close" : "Cancel", () => closeOverlay(p.overlay)))
-        .when(this.existing, (el) => el.child(button("n-text", "Edit as text", () => this.editText(), { tip: "Open the card's Markdown file" }))
-          .when(!this.locked && this.loaded, (e2) => e2.child(button("n-save", "Save", (cx) => this.saveForm(cx), { primary: true }))))
-        .when(!this.existing, (el) => el.child(button("n-help", this.busy === "help" ? "Starting…" : "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields", dim: this.creating && this.busy !== "help" }))
-          .child(button("n-create", this.busy === "create" ? "Creating…" : "Create card", (cx) => this.create(cx), { primary: true, dim: this.creating && this.busy !== "create" }))
-          .child(button("n-start", this.busy === "start" ? "Creating and starting…" : "Create and start", (cx) => this.create(cx, true), { dim: this.creating && this.busy !== "start", primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" }))));
-  }
-}      setShared(BUMP, Date.now());   // the card shows up on the board at once
+      setShared(BUMP, Date.now());   // the card shows up on the board at once
       closeOverlay(p.overlay);       // the start can take a while: do not keep the form open for it
       if (startNow) {
         const s = await cli(c, ["start", id], 90000);
         // an auto-start tick may have started the (approved) card between `new` and `start`: that is a success
         if (!s.ok && !/already running/.test(s.err))
           // the card exists and is approved: it will start when a slot is free, or start it from the board
-          notify({ title: `${id} was created but did not start`, body: String(s.err).replace(/s+/g, " ").slice(0, 700), level: "error" });
+          notify({ title: `${id} was created but did not start`, body: String(s.err).replace(/\s+/g, " ").slice(0, 700), level: "error" });
         setShared(BUMP, Date.now());
       }
     });
