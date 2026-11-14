@@ -233,6 +233,7 @@ function cmdNew(board, args) {
     try { f = JSON.parse(decodeURIComponent(fields)); } catch { die('--fields is not valid encoded JSON'); }
     if (f.model && !MODELS.includes(f.model)) die(`model must be one of ${MODELS.join(', ')}`);
     if (f.effort && !EFFORTS.includes(f.effort)) die(`effort must be one of ${EFFORTS.join(', ')}`);
+    if (file) f.approved = false;   // the person approves: an agent's file never starts a card by itself
     text = applyFields(tpl, f);
   }
   writeAtomic(path, text);
@@ -520,10 +521,10 @@ function cmdDraft(board, args) {
   const args2 = ['run', '--bg', '--no-parent', '--outlive-parent', '--name', name, '--cwd', slash(r.path), '--label', 'draft=1'];
   if (board.space) args2.push('--label', `herdr.space=${board.space}`);
   args2.push('--', 'claude', '--model', board.plannerModel || 'sonnet', '--permission-mode', board.permissionMode || 'auto',
-    '-n', `New card: ${title || repo}`.slice(0, 60), '--append-system-prompt-file', slash(rules), brief);
+    '-n', `New card: ${title || repo}`.slice(0, 60), '--add-dir', slash(board.dir), '--append-system-prompt-file', slash(rules), brief);
   hc(board, args2);
   acceptTrustPrompt(board, name);
-  console.log(name);
+  console.log(liveTerminals(board)[name]?.address || name);   // what the panel focuses (a card's address, not its name)
 }
 
 function cmdPlan(board, args) {
