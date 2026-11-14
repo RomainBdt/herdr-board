@@ -560,6 +560,7 @@ function cmdAsk(board, [id, ...qs]) {
   }
   setSection(card, 'Questions', `_Asked ${now()}_\n\n` + qs.map((q, i) => `${i + 1}. ${q}`).join('\n'));
   setSection(card, 'Answers', ANSWERS_HINT(card.id));
+  delete card.meta.reopened_outcome;   // the card is a live question again: it must not slide back to Done by itself
   card.meta.status = 'needs-you';
   card.meta.updated = now();
   saveCard(card);
@@ -598,13 +599,17 @@ function cmdDone(board, args) {
   const flag = takeFlag(args, '--state');
   if (given && !flag) die(`--state needs a value: ${OUTCOMES.join(', ')}`);
   const state = flag || 'reached';
+  const givenPr = args.includes('--pr');
   const pr = takeFlag(args, '--pr');
+  if (givenPr && !pr) die('--pr needs the pull request link');
   const [id, ...summary] = args;
   if (!id || !summary.length) die(`usage: done <id> [--state ${OUTCOMES.join('|')}] [--pr <url>] "<summary>"`);
   if (!OUTCOMES.includes(state)) die(`--state must be one of ${OUTCOMES.join(', ')}`);
   const card = loadCard(board, id);
   card.meta.outcome = state;
-  setSection(card, 'Result', `_${now()}_\n\n${summary.join(' ')}`);
+  setSection(card, 'Result', `_${now()}_\n\n${summary.join(' ')}${pr ? `\n\nPull request: ${pr}` : ''}`);
+  delete card.meta.reopened_outcome;   // an explicit `done` replaces the outcome remembered by a reopen
+  delete card.meta.busy_ms;
   const w = whereOf(card);
   setSection(card, 'Where we are', `- Goal: ${w.goal}\n- Done: ${w.done}\n- Next: nothing, card done (see Result)`);
   card.meta.status = 'done';
