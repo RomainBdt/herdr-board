@@ -161,3 +161,19 @@ with `./deploy.sh` (or point the local board at this checkout).
 
 herdr-board is under the license in `LICENSE`. `mod-tabs/` is a modified copy of the `tabs` mod shipped with Herdr,
 which is under the Apache License 2.0; see `NOTICE`.
+
+## Done tag colors
+
+Every tag on a Done card has its own color:
+
+| Tag | Color |
+|---|---|
+| None | gray `#9ca3af` |
+| Local commit | yellow `#e5b92e` |
+| Local + review | lime `#a6c93a` |
+| Draft PR | light green `#5cc86a` |
+| PR ready | teal `#22b8a0` |
+| Merged | strong green `#15a34a` |
+| Done (target in plain words) | blue `#7b93e0` |
+| Blocked | orange `#f97316` |
+| Not reached | red `#ef4444` |
