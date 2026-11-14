@@ -3,7 +3,7 @@ id: {{id}}
 title: {{title}}
 repo: {{repo}}
 status: todo
-done: pr-ready        # report | local | local-reviewed | draft-pr | pr-ready | merged | or plain words
+done: pr-ready        # none | local | local-reviewed | draft-pr | pr-ready | merged | or plain words
 model:                # haiku | sonnet | opus  (empty: the planner proposes)
 effort:               # low | medium | high | xhigh  (empty: the planner proposes)
 approved: false       # true: starts without waiting for your approval

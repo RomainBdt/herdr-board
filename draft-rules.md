@@ -17,7 +17,7 @@ another Claude Code agent will run alone, end to end, so it must say enough to r
 ## Fields
 
 `title` (short), `context`, `constraints`, `doneLooks` (what the person will check),
-`done` (report | local | local-reviewed | draft-pr | pr-ready | merged; default pr-ready), `model` (haiku | sonnet | opus | empty),
+`done` (none | local | local-reviewed | draft-pr | pr-ready | merged; default pr-ready), `model` (haiku | sonnet | opus | empty),
 `effort` (low | medium | high | xhigh | empty), `approved` (always false: the person approves).
 Empty fields are fine: they keep the template defaults.
 
