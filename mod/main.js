@@ -759,6 +759,7 @@ export default class HerdrBoard extends View {
     this.model = "";          // "" = let the planner propose
     this.effort = "";
     this.approved = false;
+    this.creating = false;
     const area = () => EditorState.new({ language: "markdown", value: "", soft_wrap: true, line_numbers: false, folding: false,
       font_family: settings().font_family, font_size: 13 });
     this.context = area();
@@ -773,18 +774,20 @@ export default class HerdrBoard extends View {
 
   create(cx) {
     const p = props();
+    if (this.creating) return;   // a second click or Enter would create a second card
     if (!this.pick || !this.title.trim()) { this.msg = "Pick a repo and write a title."; cx.notify(); return; }
     const fields = encodeURIComponent(JSON.stringify({
       done: this.done, model: this.model, effort: this.effort, approved: this.approved,
       context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
     }));
     if (fields.length > 28000) { this.msg = "The text is too long for the form. Shorten it, or edit the card afterwards."; cx.notify(); return; }
+    this.creating = true;
     this.msg = "Creating…";
     cx.notify();
     cx.spawn(async (cx) => {
       const c = p.boards[this.pick.b].conn;
       const r = await cli(c, ["new", this.pick.repo, this.title.trim(), "--fields", fields]);
-      if (!r.ok) { this.msg = r.err; cx.notify(); return; }
+      if (!r.ok) { this.creating = false; this.msg = r.err; cx.notify(); return; }
       setShared(BUMP, Date.now());
       closeOverlay(p.overlay);
     });
@@ -843,7 +846,7 @@ export default class HerdrBoard extends View {
         .child(label("Start", "Without approval the card waits for you in To do"))
         .child(chip("appr", [[false, "Wait for my approval"], [true, "Start as soon as a slot is free"]], this.approved, (v) => { this.approved = v; })))
       .child(h_flex().px(18).h(52).flex_shrink_0().gap(8).items_center().border_t(1).border_color(t.border)
-        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.msg === "Creating…" ? t.muted : t.blocked).child(this.msg))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
         .child(button("n-cancel", "Cancel", () => closeOverlay(p.overlay)))
         .child(button("n-create", "Create card", (cx) => this.create(cx), { primary: true })));
   }

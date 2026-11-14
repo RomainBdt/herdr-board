@@ -221,7 +221,15 @@ function cmdNew(board, args) {
     .replaceAll('{{id}}', id).replaceAll('{{repo}}', repo).replaceAll('{{title}}', title)
     .replaceAll('{{created}}', now());
   const path = cardPath(board, id);
-  writeAtomic(path, fields ? applyFields(tpl, JSON.parse(decodeURIComponent(fields))) : tpl);
+  let text = tpl;
+  if (fields) {
+    let f;
+    try { f = JSON.parse(decodeURIComponent(fields)); } catch { die('--fields is not valid encoded JSON'); }
+    if (f.model && !MODELS.includes(f.model)) die(`model must be one of ${MODELS.join(', ')}`);
+    if (f.effort && !EFFORTS.includes(f.effort)) die(`effort must be one of ${EFFORTS.join(', ')}`);
+    text = applyFields(tpl, f);
+  }
+  writeAtomic(path, text);
   console.log(`${id}  ${slash(path)}`);
 }
 
