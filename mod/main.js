@@ -4,7 +4,7 @@
 // The same mod also draws its dialogs (settings, card editor, answers, new card) when opened as an overlay.
 // Settings live in Herdr's shared state ("herdr-board.settings"), so the tab bar's Board button sees them too.
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, EditorState, Editor } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, EditorState, Editor, TextareaState, Textarea } from "gpui-base";
 import { exec, run, props, theme, settings, notify, playSound, openOverlay, closeOverlay, readTextFile, shared, setShared, agents, nextCommand, layout, machines } from "herdr";
 
 const COLUMNS = [
@@ -823,16 +823,27 @@ export default class HerdrBoard extends View {
     this.effort = "";
     this.approved = false;
     this.creating = false;
-    const area = () => EditorState.new({ language: "markdown", value: "", soft_wrap: true, line_numbers: false, folding: false,
-      font_family: settings().font_family, font_size: 13 });
-    this.context = area();
-    this.constraints = area();
-    this.doneLooks = area();
+    // Plain text areas (same font as the Title field); Tab walks Title -> Context -> Constraints -> Done looks like.
+    this.context = TextareaState.new({ value: "" });
+    this.constraints = TextareaState.new({ value: "" });
+    this.doneLooks = TextareaState.new({ value: "" });
     this.input = InputState.new({ value: "" });
     this.input.on("change", (_e, cx) => { this.title = this.input.value(); if (this.title.trim()) this.errs.title = ""; cx.notify(); });
     this.input.on("submit", (_e, cx) => this.create(cx));
+    for (const st of [this.input, this.context, this.constraints, this.doneLooks]) st.on("focus", () => { this.focused = st; });
+    this.focused = this.input;
     this.input.focus();
     cx.timer.after(400, () => this.input.focus());
+  }
+
+  // Tab / Shift+Tab: the next / previous text field, in the order they are on the screen.
+  tabField(e, cx) {
+    const order = [this.input, this.context, this.constraints, this.doneLooks];
+    const at = order.findIndex((s) => this.focused === s);
+    const to = order[(Math.max(at, 0) + (e.modifiers?.shift ? order.length - 1 : 1)) % order.length];
+    this.focused = to;
+    to.focus();
+    cx.stop_propagation();
   }
 
   create(cx) {
@@ -904,10 +915,12 @@ export default class HerdrBoard extends View {
       .child(div().text_size(11.5).font_semibold().text_color(t.muted).child(text))
       .when(Boolean(hint), (el) => el.child(div().text_size(11).text_color(t.dim).child(hint)));
     const err = (text) => div().text_size(11.5).text_color(t.blocked).child(`⚠ ${text}`);
-    const area = (state, h) => div().h(h).flex_shrink_0().rounded(8).border_1().border_color(t.input).bg(t.background).p(6)
-      .child(Editor.new(state).size_full());
+    const area = (state, h) => Textarea.new(state).h(h).flex_shrink_0().px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8);
     return v_flex().id("new").size_full().bg(t.popover).text_color(t.foreground)
-      .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); } })
+      .on_key_down((e, cx) => {
+        if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); }
+        else if (e.key === "tab") this.tabField(e, cx);
+      })
       .child(h_flex().px(18).h(48).flex_shrink_0().items_center().border_b(1).border_color(t.border)
         .child(div().flex_1().text_size(15).font_semibold().child("New card"))
         .child(div().text_size(11).text_color(t.dim).child("Esc closes without creating")))
