@@ -18,7 +18,7 @@ draft PR, a merged PR...). You run several cards at once and look only at the on
 
 ```mermaid
 flowchart LR
-  you([You]) -- "click + / Start / Answer" --> panel
+  you([You]) -- "click + / Approve / Start / Answer" --> panel
   subgraph laptop [Where you work]
     panel["Herdr panel<br/>(herdr-board mod)"]
   end
@@ -45,21 +45,23 @@ the terminals through `hc`. Nothing else holds state, so you can also run everyt
 ```mermaid
 stateDiagram-v2
   [*] --> todo: new
-  todo --> ready: plan + approve
+  todo --> ready: approve
   ready --> running: start (free slot)
   todo --> running: approved + free slot
-  running --> needs_you: agent asks, or is stuck
+  running --> needs_you: agent asks, is blocked or stopped
+  todo --> needs_you: could not start
+  ready --> needs_you: could not start
   needs_you --> running: you answer
   running --> done: agent calls done
   done --> running: agent busy 5+ min on new work
   running --> done: agent idle again
-  done --> archived: clean
+  done --> archived: clean (archive on)
   archived --> [*]
   needs_you: needs-you
 ```
 
 1. **Write** a card: Context, Constraints, and "Done looks like". **Create with agent** can help you fill it in.
-2. **Plan** (optional): a one-shot Claude suggests the model, effort and order. **Approve** the card.
+2. **Approve** the card. Pick a model and effort, or leave them on Auto: a one-shot Haiku call chooses them and says why on the card.
 3. **Start**: when a slot is free (`maxParallel`), the CLI creates the worktree, opens a terminal, starts Claude Code and
    gives it the card and the rules in `rules.md`. Auto-start can do this for you.
 4. **Work**: the agent keeps three short lines up to date (◎ goal, ✓ done, → next) so you can get back into the topic in seconds.
@@ -114,15 +116,13 @@ The tool rewrites a **Next action** section at the top of each card, so you alwa
 2. Try it on **one computer**: leave Machine empty in the panel settings and point *Board CLI* at `herdr-board.mjs` in this checkout.
 3. Create a board folder with a `board.json` that lists your repos ([example](#boardjson)).
 4. Run `./install.sh`, pick the `board` layout with `Ctrl+Shift+L`, open ⚙ → Boards and fill in the paths.
-5. Click **+**, write a card, **Plan**, approve, **▶ Start next**.
+5. Click **+**, write a card, approve, **▶ Start next**.
 
 For a separate machine, run `./deploy.sh <machine> <folder>` to copy the CLI there.
 
 ---
 
 # Reference
-
-the repos. You can open any card's session in Herdr and type into it at any time.
 
 ## What you need
 
@@ -146,10 +146,10 @@ Cards that need you move to **Needs you**: answer there. The command line does t
 ## Layout on the server
 
 ```
-board/                       on the server
-  board.json                 repos, colors, max parallel agents, Herdr space
+board/                       the board folder, on the server
+  board.json                 repos, colors, max parallel agents, auto-start, Herdr space
   cards/DEMO-1.md            one card per file
-herdr-board/                 this code, copied by ./deploy.sh
+<folder>/                    the code, copied there by ./deploy.sh <machine> <folder>
   herdr-board.mjs            the CLI (Node, no packages)
   rules.md                   what every card agent is told (autonomy, questions, done targets)
   card-template.md           a new card
@@ -158,7 +158,7 @@ herdr-board/                 this code, copied by ./deploy.sh
 
 ## Flow
 
-`new` → you fill in Context / Constraints / Done looks like → `approve` (or `approved: true` on the card) → `next` starts cards by id while slots are free
+`new` → you fill in Context / Constraints / Done looks like → `approve` (model and effort may be left on Auto: Haiku picks them) (or `approved: true` on the card) → `next` starts cards by id while slots are free
 → the agent works, keeps "Where we are" up to date, and either
 `ask`s (all its questions at once; card goes to **needs-you**) or calls `done`.
 → you write answers under `## Answers` and run `answer <id>` (or `answer <id> "text"`); the agent continues.
@@ -183,6 +183,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | you | `show <id>` / `update <id> --hash <h> --fields <enc>` | the card's form fields as JSON / change a card that has not started (what the panel's card form uses; refuses if the file changed since `show`) |
 | you | `answer <id> ["text"]` | send your answers to the live session |
 | you | `press <id> <key>...` | answer the prompt a blocked agent is showing (a permission prompt or a single-question AskUserQuestion) by pressing that option's number, then watch its screen for 8 s. Never sends the same answer twice: after a send that did not seem to land, it only looks again. The panel's option buttons and Retry run this |
+| you | `config <key> <value>` | board settings in `board.json`: `maxParallel` 1-10, `autoStart` on/off, `autoInterval` minutes, `cleanWorktree` / `cleanBranch` / `cleanArchive` on/off |
 | you | `ls [--json]` | the board; `--json` is what the Herdr panel reads |
 | you | `clean <id>` | stop its agent and any terminal sitting in its worktree (when it has no uncommitted changes; busy folders are retried for a few seconds), then as the board's Clean settings say: remove its worktree, delete its branch, move the card to `archived` (all on by default; set with `config cleanWorktree`, `cleanBranch`, `cleanArchive` `on`/`off`) |
 | agent | `where` / `ask` / `done [--state s] [--pr url]` | update its own card; never edits the file directly. `--state` (`reached` default, `partial`, `blocked`, `failed`, `abandoned`) decides the tag shown on a Done card: the Finish-with state reached (None, Local commit, Local + review, Draft PR, PR ready, Merged), "Blocked", or "Not reached" |
