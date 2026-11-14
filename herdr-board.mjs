@@ -250,7 +250,7 @@ function cmdLs(board, args) {
     return {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note,
-      done: c.meta.done || '', outcome: c.meta.status === 'done' || c.meta.status === 'archived' ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
+      done: c.meta.done || '', outcome: c.meta.status === 'done' ? (c.meta.outcome || 'reached') : '', model: c.meta.model || '', effort: c.meta.effort || '',
       approved: c.meta.approved === 'true',
       proposed: c.meta.proposed_model
         ? { model: c.meta.proposed_model, effort: c.meta.proposed_effort, order: Number(c.meta.proposed_order) || 99, note: c.meta.plan_note || '' }
@@ -337,7 +337,10 @@ function cmdAnswer(board, args) {
 const OUTCOMES = ['reached', 'partial', 'blocked', 'failed', 'abandoned'];
 
 function cmdDone(board, args) {
-  const state = takeFlag(args, '--state') || 'reached';
+  const given = args.includes('--state');
+  const flag = takeFlag(args, '--state');
+  if (given && !flag) die(`--state needs a value: ${OUTCOMES.join(', ')}`);
+  const state = flag || 'reached';
   const [id, ...summary] = args;
   if (!id || !summary.length) die(`usage: done <id> [--state ${OUTCOMES.join('|')}] "<summary>"`);
   if (!OUTCOMES.includes(state)) die(`--state must be one of ${OUTCOMES.join(', ')}`);

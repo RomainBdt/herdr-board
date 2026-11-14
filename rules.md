@@ -13,7 +13,7 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
   - `{{board}} ask {{id}} "<question 1>" "<question 2>" ...`: when you are blocked (see below).
   - `{{board}} done {{id}} [--state <state>] "<summary>"`: when you stop for good. The state is shown as a tag on the card:
     `reached` (default: the done target is reached), `partial` (part of it works, the rest is not done),
-    `blocked` (cannot go on without something you cannot get), `failed` (tried, it does not work),
+    `blocked` (cannot go on and asking the person would not help; if a question can unblock you, use `ask` instead), `failed` (tried, it does not work),
     `abandoned` (not worth doing or no longer needed). Say why in the summary when it is not `reached`.
 - "Constraints" are hard rules. "Context" and "Done looks like" define the job.
 
