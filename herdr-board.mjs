@@ -468,6 +468,7 @@ function cmdTick(board) {
 function git(args, opts = {}) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
 }
+function gitWhy(e) { return String(e.stderr || e.message).trim().split('\n')[0]; }   // first line of git's error
 
 function startCard(board, card) {
   const repo = board.repos[card.meta.repo];
@@ -703,9 +704,9 @@ function cmdClean(board, [id]) {
   hc(board, ['kill', name], { json: false, allowFail: true });
   hc(board, ['rm', name], { json: false, allowFail: true });
   if (opt.worktree && card.meta.worktree && existsSync(card.meta.worktree)) {
-    try { git(['-C', repo.path, 'worktree', 'remove', card.meta.worktree]); did.push('worktree removed'); }
+    try { git(['-C', repo.path, 'worktree', 'remove', card.meta.worktree], { env: { ...process.env, LC_ALL: 'C' } }); did.push('worktree removed'); }   // LC_ALL=C: the message below is matched in English
     catch (e) {
-      const why = String(e.stderr || e.message).trim().split('\n')[0];
+      const why = gitWhy(e);
       if (/is not a working tree/.test(why)) {
         // git no longer knows this folder (a leftover): remove it only when empty, else leave it and say so
         let left = [];
@@ -734,7 +735,7 @@ function cmdClean(board, [id]) {
         else {
           try { git(['-C', repo.path, 'branch', '-D', branch]); did.push(`branch ${branch} deleted`); }
           // e.g. still checked out in a worktree that was kept (cleanWorktree off): never lose the archive step over it
-          catch (e2) { note = `branch ${branch} kept: ${String(e2.stderr || e2.message).trim().split('\n')[0]}`; }
+          catch (e2) { note = `branch ${branch} kept: ${gitWhy(e2)}`; }
         }
       }
     }

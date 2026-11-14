@@ -138,7 +138,7 @@ export default class HerdrBoard extends View {
           const r = await cli(c, ["tick"], 180000);
           src.ticking = false;
           const failed = !r.ok ? r.err : /auto-start failed/.test(r.out) ? r.out : "";   // the CLI reports a failed run on stdout
-          if (failed && !src.tickFailed) notify({ title: `Auto-start failed${this.boards().length > 1 ? ` on ${machineName(c)}` : ""}`, body: failed.slice(0, 300), level: "error" });
+          if (failed && !src.tickFailed) notify({ title: `Auto-start failed${this.boards().length > 1 ? ` on ${machineName(c)}` : ""}`, body: failed.replace(/\s+/g, " ").slice(0, 700), level: "error" });
           src.tickFailed = Boolean(failed);   // once per failing stretch, not every 30 s
           if (r.ok && /started:/.test(r.out)) this.refreshOne(cx, c);
         });
