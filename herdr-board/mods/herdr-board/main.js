@@ -87,16 +87,22 @@ async function cli(c, args, timeout = 30000) {
   }
 }
 
+const PRESSED = {};   // button id -> when a press last ran its action
+
 function button(id, text, action, { primary = false, tone = null, tip = null } = {}) {
   const t = theme();
   const fg = primary ? t.solid_foreground : tone ?? t.foreground;
+  const pressed = PRESSED;   // per button id, so a redraw between press and release does not lose it
   return h_flex().id(id).h(22).px(8).items_center().rounded(6).flex_shrink_0()
     .border_1().border_color(primary ? t.solid : t.border).bg(primary ? t.solid : t.raised)
     .text_size(11).font_medium().text_color(fg).cursor_pointer()
     .hover((s) => s.opacity(0.85))
     .when(Boolean(tip), (el) => el.tooltip(tip))
-    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-    .on_click((_e, cx) => { cx.stop_propagation(); action(cx); })
+    // Act on the press, not only on the release: a click that needs the release to land on the same element
+    // is lost when the view redraws or the pane is only taking focus, and the button then needs a second click.
+    // The click handler stays for keyboard activation, and is skipped when the press already ran the action.
+    .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); pressed[id] = Date.now(); action(cx); })
+    .on_click((_e, cx) => { cx.stop_propagation(); if (Date.now() - (pressed[id] ?? 0) > 3000) action(cx); })
     .child(text);
 }
 
