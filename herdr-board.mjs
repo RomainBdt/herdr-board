@@ -29,6 +29,7 @@ function now() {   // local time, "2026-11-14 10:04"
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace('T', ' ');
 }
 function slash(p) { return p.replace(/\\/g, '/'); }
+function sleepMs(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
 
 function takeFlag(args, name) {
   const i = args.indexOf(name);
@@ -565,7 +566,7 @@ function acceptTrustPrompt(board, name) {
     const screen = hc(board, ['read', name], { json: false, allowFail: true }) || '';
     if (/trust this folder/i.test(screen)) { hc(board, ['keys', name, 'down', 'enter'], { json: false }); return; }
     if (/❯/.test(screen) && /effort|auto mode/i.test(screen)) return;   // already at its prompt
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    sleepMs(1000);
   }
 }
 
@@ -698,6 +699,36 @@ function cmdConfig(board, [key, value]) {
   if (key === 'maxParallel') startNext(loadBoard(board.dir), { quiet: true });   // more room: start what waits
 }
 
+// Terminals (any name) whose working folder is the given folder or inside it.
+function terminalsIn(board, dir) {
+  const norm = (p) => slash(String(p || '')).replace(/\/+$/, '').toLowerCase();
+  const root = norm(dir);
+  const r = hc(board, ['ls'], { allowFail: true });
+  return (r?.terminals || []).filter(t => { const c = norm(t.cwd); return c === root || c.startsWith(root + '/'); });
+}
+
+function stopTerminalsIn(board, dir) {
+  const stopped = [];
+  for (const t of terminalsIn(board, dir)) {
+    hc(board, ['kill', t.address], { json: false, allowFail: true });
+    hc(board, ['rm', t.address], { json: false, allowFail: true });
+    stopped.push(t.name || t.address);
+  }
+  return stopped;
+}
+
+// Windows keeps a folder busy for a moment after its process dies: retry a few times (about 4 s) on busy/permission errors.
+function retryBusy(fn) {
+  for (let i = 0; ; i++) {
+    try { return fn(); }
+    catch (e) {
+      const msg = `${e.code || ''} ${e.message || ''} ${e.stderr || ''}`;
+      if (i >= 8 || !/EBUSY|EPERM|EACCES|ENOTEMPTY|Device or resource busy|in use|Permission denied|Directory not empty/i.test(msg)) throw e;
+      sleepMs(500);
+    }
+  }
+}
+
 // Clean: always stops the agent; then, as the board's "clean" settings say (config cleanWorktree|cleanBranch|cleanArchive):
 // removes the worktree, deletes the branch, moves the card to archived.
 function cmdClean(board, [id]) {
@@ -711,7 +742,13 @@ function cmdClean(board, [id]) {
   hc(board, ['kill', name], { json: false, allowFail: true });
   hc(board, ['rm', name], { json: false, allowFail: true });
   if (opt.worktree && card.meta.worktree && existsSync(card.meta.worktree)) {
-    try { git(['-C', repo.path, 'worktree', 'remove', card.meta.worktree], { env: { ...process.env, LC_ALL: 'C' } }); did.push('worktree removed'); }   // LC_ALL=C: the message below is matched in English
+    // Windows refuses to delete a folder some terminal still sits in: stop every terminal whose cwd is inside it
+    // (not when git will refuse anyway because of uncommitted work: keep those terminals alive)
+    let dirty = false;
+    try { dirty = git(['-C', card.meta.worktree, 'status', '--porcelain']) !== ''; } catch { /* not a worktree any more: nothing to protect */ }
+    const stopped = dirty ? [] : stopTerminalsIn(board, card.meta.worktree);
+    if (stopped.length) did.push(`stopped ${stopped.length} terminal(s) in the worktree (${stopped.join(', ')})`);
+    try { retryBusy(() => git(['-C', repo.path, 'worktree', 'remove', card.meta.worktree], { env: { ...process.env, LC_ALL: 'C' } })); did.push('worktree removed'); }   // LC_ALL=C: the message below is matched in English
     catch (e) {
       const why = gitWhy(e);
       if (/is not a working tree/.test(why)) {
@@ -719,12 +756,16 @@ function cmdClean(board, [id]) {
         let left = [];
         try { left = readdirSync(card.meta.worktree); } catch { /* unreadable */ }
         if (left.length) die(`${card.id}: ${card.meta.worktree} is not a git worktree but has ${left.length} file(s) (${left.slice(0, 5).join(', ')}); left in place`);
-        try { rmdirSync(card.meta.worktree); did.push('empty leftover worktree folder removed'); }
-        catch (e2) { die(`${card.id}: could not remove empty folder ${card.meta.worktree}: ${e2.message}`); }
+        try { retryBusy(() => rmdirSync(card.meta.worktree)); did.push('empty leftover worktree folder removed'); }
+        catch (e2) {
+          const still = terminalsIn(board, card.meta.worktree).map(t => `${t.name || t.address} (${t.address})`);
+          die(`${card.id}: could not remove empty folder ${card.meta.worktree}: ${e2.message}${still.length ? `. Still open in: ${still.join(', ')}` : ''}`);
+        }
       } else {
         let files = '';
         try { files = git(['-C', card.meta.worktree, 'status', '--porcelain']).split('\n').filter(Boolean).slice(0, 8).join('; '); } catch { /* none */ }
-        die(`${card.id}: worktree not removed, left in place (${card.meta.worktree}). ${files ? `Changes: ${files}. ` : ''}Git said: ${why}`);
+        const still = terminalsIn(board, card.meta.worktree).map(t => `${t.name || t.address} (${t.address})`);
+        die(`${card.id}: worktree not removed, left in place (${card.meta.worktree}). ${files ? `Changes: ${files}. ` : ''}${still.length ? `Still open in: ${still.join(', ')}. ` : ''}Git said: ${why}`);
       }
     }
   }
