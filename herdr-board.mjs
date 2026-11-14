@@ -175,7 +175,9 @@ function display(card, live) {
   if (!t) return { column: 'needs-you', note: 'agent stopped (no terminal)' };
   if (t.status === 'blocked') return { column: 'needs-you', note: 'waiting on a prompt in its session' };
   if (t.status === 'error') return { column: 'needs-you', note: 'agent reported an error' };
-  if (t.status === 'done' || t.status === 'idle') return { column: 'needs-you', note: 'agent stopped without asking or finishing' };
+  // just started or just answered: an agent reads as idle for a moment before its turn begins
+  const fresh = Date.now() - Number(card.meta.active_ms || 0) < 90000;
+  if (!fresh && (t.status === 'done' || t.status === 'idle')) return { column: 'needs-you', note: 'agent stopped without asking or finishing' };
   return { column: 'running', note: '' };
 }
 
@@ -213,14 +215,16 @@ function cmdLs(board, args) {
         ? { model: c.meta.proposed_model, effort: c.meta.proposed_effort, order: Number(c.meta.proposed_order) || 99, note: c.meta.plan_note || '' }
         : null,
       where: whereOf(c), questions: questionsOf(c),
-      terminal: (c.meta.status === 'running' || c.meta.status === 'needs-you') ? termName(c.id) : '',
+      terminal: live[termName(c.id)] ? termName(c.id) : '',
+      address: live[termName(c.id)]?.address || '',
       agent: live[termName(c.id)]?.status || '',
       path: slash(c.path),
     };
   });
   const running = cards.filter(c => c.column === 'running').length;   // same rule as the queue's free slots
   if (args.includes('--json')) {
-    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, running, machine: board.machine || '', cards }, null, 2));
+    const repos = Object.fromEntries(Object.entries(board.repos).map(([k, r]) => [k, r.color || '#888888']));
+    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, running, repos, cards }, null, 2));
     return;
   }
   console.log(`${board.name || 'board'}: ${running}/${board.maxParallel} running`);
@@ -265,7 +269,10 @@ function cmdAsk(board, [id, ...qs]) {
   startNext(board, { quiet: true });
 }
 
-function cmdAnswer(board, [id, ...text]) {
+function cmdAnswer(board, args) {
+  const uri = takeFlag(args, '--uri');            // the panel sends multi-line text encoded
+  let [id, ...text] = args;
+  if (uri !== undefined) text = [decodeURIComponent(uri)];
   if (!id) die('usage: answer <id> ["<answer text>"]   (or write them in the card under ## Answers first)');
   const card = loadCard(board, id);
   if (text.length) {
@@ -275,6 +282,7 @@ function cmdAnswer(board, [id, ...text]) {
   const answers = answersOf(card);
   if (!answers) die(`${card.id}: no answers yet. Write them under "## Answers" in ${slash(card.path)} or pass them as text.`);
   card.meta.status = 'running';
+  card.meta.active_ms = String(Date.now());
   card.meta.updated = now();
   saveCard(card);
   const name = termName(card.id);
@@ -397,6 +405,7 @@ function startCard(board, card) {
   acceptTrustPrompt(board, name);
 
   card.meta.status = 'running';
+  card.meta.active_ms = String(Date.now());
   card.meta.model = model;
   card.meta.effort = effort;
   card.meta.started = now();
@@ -472,6 +481,21 @@ Keep a model the person fixed. Reply with ONLY a JSON array: [{"id":"X-1","model
   }
 }
 
+// The panel's card editor: save <id> <text, encodeURIComponent> <hash of the text it opened, or "new">.
+// Refuses when the card changed since (an agent wrote to it), so nothing is overwritten.
+export function textHash(t) { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(16); }
+
+function cmdSave(board, [id, encoded, expected]) {
+  if (!id || encoded === undefined || !expected) die('usage: save <id> <encodeURIComponent(text)> <hash|new>');
+  const path = cardPath(board, id.toUpperCase());
+  const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
+  if (expected !== 'new' && (current === null || textHash(current) !== expected)) die('the card changed since you opened it (an agent may have updated it). Reload it and edit again.');
+  const text = decodeURIComponent(encoded);
+  parseCard(text);   // must still be a card
+  writeAtomic(path, text.endsWith('\n') ? text : text + '\n');
+  console.log(`${id.toUpperCase()}: saved`);
+}
+
 function cmdClean(board, [id]) {
   if (!id) die('usage: clean <id>   (stops its agent and removes its worktree; keeps the branch)');
   const card = loadCard(board, id);
@@ -493,7 +517,7 @@ const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD ||
 const [cmd, ...rest] = argv;
 const commands = {
   new: cmdNew, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, next: (b) => startNext(b), start: cmdStart,
-  answer: cmdAnswer, clean: cmdClean, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+  answer: cmdAnswer, clean: cmdClean, save: cmdSave, where: cmdWhere, ask: cmdAsk, done: cmdDone,
 };
 if (!cmd || !commands[cmd]) {
   console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));

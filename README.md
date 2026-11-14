@@ -71,3 +71,19 @@ OpenSSH Server on the laptop, listening on 127.0.0.1 only (`C:\fake-server\setup
 and `hc machine add fakeserver --name server --session fakeserver`. After each reboot, in an admin PowerShell
 `Start-Service sshd`, then in a normal terminal `HC_SESSION=fakeserver hc server start` (the elevated SSH login may not
 start it while you are signed in at the desktop). `Stop-Service sshd` when done testing.
+
+## The board panel (Herdr, on the laptop)
+
+`./install.sh` copies the panel mod (`mod/` → `~/.config/herdr-app/mods/herdr-board`) and the `board` layout (Herdr's
+main layout with the board across the top of the work area). Pick it with `Ctrl+Shift+L`. Set the board block's
+`props` in `layouts/board.json`: `machine` (from `hc machine ls`), `script` and `board` (paths on that machine).
+
+- Five columns; each card shows its repo color, model, done target and its 3 "where we are" lines
+  (◎ goal, ✓ done, → next). Questions show on the card in **Needs you**.
+- **Open** jumps to the card's live session: type to take over. Each card's tab is named after it.
+- **Answer** shows the questions with a box for your answers; **Send answers** delivers them to the session.
+- Clicking a card opens the full card in an editor (saved on the server; refused if an agent changed it meanwhile).
+- **+ New card**, **Plan**, **Start next** in the header. A toast and a sound when a card needs you or is done.
+- Keys you can bind in `keys.json`: `herdr-board.answer` (first card with questions), `herdr-board.jump`
+  (its session), `herdr-board.refresh`.
+- It reads `herdr-board ls --json` from the server every 5 seconds.
