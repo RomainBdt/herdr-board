@@ -124,7 +124,45 @@ function loadCard(board, id) {
   return card;
 }
 
-function saveCard(card) { writeAtomic(card.path, renderCard(card)); }
+// "Next action": what is left for the person, from the card's status and done target. Rewritten on every save,
+// so it is always current; it sits right after the front matter so it is the first thing seen on opening a card.
+function nextActionOf(card) {
+  const status = card.meta.status || 'todo';
+  const target = (card.meta.done || '').split('#')[0].trim();
+  const id = card.id;
+  if (status === 'todo') return card.meta.approved === 'true' ? 'Nothing: waiting for a free slot to start.' : `**You:** approve the card (\`approve ${id}\`) so the agent can start.`;
+  if (status === 'ready') return 'Nothing: approved, waiting for a free slot to start.';
+  if (status === 'running') return 'Nothing: the agent is working.';
+  if (status === 'needs-you') {
+    return questionsOf(card).length
+      ? `**You:** answer the questions below, then run \`answer ${id}\`.`
+      : '**You:** the agent stopped without asking or finishing. Check its session, or run `start` again.';
+  }
+  if (status === 'done') {
+    switch (target) {
+      case 'local': return `**You:** the change is committed on branch \`${card.meta.branch || 'card/' + id}\`. Review it and merge or push it yourself.`;
+      case 'local-reviewed': return `**You:** committed and self-reviewed on branch \`${card.meta.branch || 'card/' + id}\`. Review it, then merge or push it yourself.`;
+      case 'draft-pr': return '**You:** review the draft pull request (link in Result), mark it ready and merge it.';
+      case 'pr-ready': return '**You:** review the pull request (link in Result) and merge it.';
+      case 'merged': return 'Nothing: the pull request is merged. Check the Result.';
+      default: return `**You:** check the Result against the target: ${target || 'see Context'}.`;
+    }
+  }
+  return '';
+}
+
+function saveCard(card) {
+  const body = nextActionOf(card);
+  if (body) {
+    setSection(card, 'Next action', body);
+    // keep it first: right after the untitled part before the first "##"
+    const i = card.sections.findIndex(s => s.title === 'Next action');
+    const [s] = card.sections.splice(i, 1);
+    const first = card.sections.findIndex(x => x.title);
+    card.sections.splice(first < 0 ? card.sections.length : first, 0, s);
+  }
+  writeAtomic(card.path, renderCard(card));
+}
 
 function allCards(board) {
   if (!existsSync(board.cardsDir)) return [];

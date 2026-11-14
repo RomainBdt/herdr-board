@@ -23,6 +23,9 @@ herdr-board/                 this code, copied by ./deploy.sh
 → you write answers under `## Answers` and run `answer <id>` (or `answer <id> "text"`); the agent continues.
 `ask` and `done` start the next card in the queue.
 
+Every card has a **Next action** section at the top, rewritten by the tool on each save from the status and the `done:` target:
+it says whether something is on you (approve, answer, review, merge) or nothing is.
+
 ## Commands
 
 Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/herdr-board.mjs ..."`.
