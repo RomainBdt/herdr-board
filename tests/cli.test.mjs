@@ -1,7 +1,8 @@
 // The command line, run as a child process on a throwaway board (see helpers.mjs: no `hc`, no real board).
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync, existsSync, rmSync, mkdirSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tempBoard, cardText, ROOT } from './helpers.mjs';
 
@@ -247,5 +248,133 @@ describe('card-creator skill: model and effort chosen at creation', () => {
     assert.match(card('TST-1').meta.auto_choice, /^Haiku choice failed/);
     assert.equal(card('TST-1').meta.model, 'sonnet');
     assert.equal(card('TST-1').meta.effort, 'medium');
+  });
+});
+
+describe('resume (archived cards)', () => {
+  const SESSION = '11111111-2222-4333-8444-555555555555';
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' });
+  // a real repo (no remote), a fake hc that logs what it is asked, and a fake Claude config folder
+  function setup(extra = {}) {
+    const repo = join(b.dir, 'repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+    const board = JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8'));
+    board.repos.app.path = repo;
+    writeFileSync(join(b.dir, 'board.json'), JSON.stringify(board));
+    const log = join(b.dir, 'hc.log');
+    const fake = join(b.dir, 'hc.mjs');
+    writeFileSync(fake, `import {appendFileSync} from 'node:fs';
+appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+const c = process.argv[2];
+console.log(c === 'ls' ? '{"terminals":[]}' : c === 'read' ? '❯ auto mode' : '{}');`);
+    const claude = join(b.dir, 'claude-config');
+    const run = (...args) => {
+      const env = { ...process.env, HERDR_BOARD_HC_SCRIPT: fake, CLAUDE_CONFIG_DIR: claude };
+      const r = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', b.dir, ...args], { env, encoding: 'utf8' });
+      return { code: r.status, out: r.stdout, err: r.stderr };
+    };
+    const calls = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l)) : []);
+    const wt = join(b.dir, 'worktrees', 'TST-1').replace(/\\/g, '/');
+    const transcript = () => {
+      const d = join(claude, 'projects', wt.replace(/[^A-Za-z0-9]/g, '-'));
+      mkdirSync(d, { recursive: true });
+      writeFileSync(join(d, `${SESSION}.jsonl`), '{}\n');
+    };
+    b.write('TST-1', cardText({ id: 'TST-1', title: 'Old', repo: 'app', status: 'archived', outcome: 'reached', model: 'sonnet', effort: 'medium', ...extra },
+      '## Where we are\n\n- Goal: g\n- Done: d\n- Next: nothing\n'));
+    return { repo, wt, run, calls, transcript };
+  }
+
+  test('start saves the session id it gives claude', () => {
+    const s = setup({ status: 'ready', approved: 'true' });
+    const r = s.run('start', 'TST-1');
+    assert.equal(r.code, 0, r.err);
+    const id = card('TST-1').meta.session;
+    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    const run = s.calls().find(c => c[0] === 'run').join(' ');
+    assert.match(run, new RegExp(`claude --session-id ${id} `));
+  });
+
+  test('ls shows the saved session, and the Resume button is only added for archived cards', () => {
+    b.write('TST-1', cardText({ id: 'TST-1', title: 'a', repo: 'app', status: 'archived', session: SESSION }));
+    const j = JSON.parse(b.run('ls', '--json').out);
+    assert.equal(j.cards[0].session, SESSION);
+    assert.equal(j.cards[0].column, 'archived');
+    const ui = readFileSync(join(ROOT, 'herdr-board', 'mods', 'herdr-board', 'main.js'), 'utf8');
+    const resume = ui.split('\n').filter(l => /"Resume"/.test(l));
+    assert.equal(resume.length, 1);
+    assert.match(resume[0], /if \(c\.column === "archived"\)/);
+  });
+
+  test('only an archived card can be resumed', () => {
+    b.write('TST-1', cardText({ id: 'TST-1', title: 'a', repo: 'app', status: 'done', session: SESSION }));
+    const r = b.run('resume', 'TST-1');
+    assert.equal(r.code, 1);
+    assert.match(r.err, /only an archived card can be resumed/);
+  });
+
+  test('no saved session: a clear message', () => {
+    const s = setup();
+    const r = s.run('resume', 'TST-1');
+    assert.equal(r.code, 1);
+    assert.match(r.err, /no saved session/);
+  });
+
+  test('session saved but its conversation file is gone: a clear message', () => {
+    const s = setup({ session: SESSION });
+    assert.match(s.run('resume', 'TST-1').err, /conversation file .* is gone/);
+  });
+
+  test('branch gone locally and on origin: says so on the card, no worktree', () => {
+    const s = setup({ session: SESSION });
+    s.transcript();
+    const r = s.run('resume', 'TST-1');
+    assert.equal(r.code, 1);
+    assert.match(r.err, /gone locally and on origin/);
+    assert.equal(existsSync(s.wt), false);
+    assert.match(section(card('TST-1'), 'Where we are').body, /cannot resume: branch card\/TST-1 is gone/);
+    assert.equal(card('TST-1').meta.status, 'archived');
+  });
+
+  test('recreates the worktree from the local branch, resumes the session, card goes back to Done', () => {
+    const s = setup({ session: SESSION });
+    s.transcript();
+    git(s.repo, 'branch', 'card/TST-1');
+    const r = s.run('resume', 'TST-1');
+    assert.equal(r.code, 0, r.err);
+    assert.equal(existsSync(join(s.wt, '.git')), true);
+    const run = s.calls().find(c => c[0] === 'run').join(' ');
+    assert.match(run, new RegExp(`claude --resume ${SESSION} `));
+    assert.match(run, /--cwd .*TST-1/);
+    const c = card('TST-1');
+    assert.equal(c.meta.status, 'done');
+    assert.match(section(c, 'Where we are').body, /resumed from the archive/);
+  });
+
+  test('recreates the worktree from the remote branch when the local one is gone', () => {
+    const s = setup({ session: SESSION });
+    s.transcript();
+    const origin = join(b.dir, 'origin.git');
+    git(b.dir, 'init', '-q', '--bare', origin);
+    git(s.repo, 'remote', 'add', 'origin', origin);
+    git(s.repo, 'push', '-q', 'origin', 'main:card/TST-1');
+    const r = s.run('resume', 'TST-1');
+    assert.equal(r.code, 0, r.err);
+    assert.equal(git(s.wt, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), 'card/TST-1');
+  });
+
+  test('never resumes into an existing worktree with uncommitted changes', () => {
+    const s = setup({ session: SESSION });
+    s.transcript();
+    git(s.repo, 'branch', 'card/TST-1');
+    git(s.repo, 'worktree', 'add', s.wt, 'card/TST-1');
+    writeFileSync(join(s.wt, 'dirty.txt'), 'x');
+    const r = s.run('resume', 'TST-1');
+    assert.equal(r.code, 1);
+    assert.match(r.err, /uncommitted changes/);
+    assert.equal(s.calls().some(c => c[0] === 'run'), false);
+    assert.equal(card('TST-1').meta.status, 'archived');
   });
 });

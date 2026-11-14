@@ -424,6 +424,8 @@ export default class HerdrBoard extends View {
     }
     if (c.address && !this.clickOpens(c)) b.push(button(`op-${u}`, "Open", () => this.open(c), { tip: "Open its live session and take over" }));
     if (c.column === "done") b.push(button(`cl-${u}`, "Clean", (cx) => this.act(cx, `Cleaning ${id}…`, ["clean", id], undefined, on), { tone: t.muted, tip: this.cleanTip(c.clean) }));
+    if (c.column === "archived") b.push(button(`rm-${u}`, "Resume", (cx) => this.act(cx, `Resuming ${id}…`, ["resume", id], 90000, on),
+      { tone: t.muted, tip: c.session ? "Recreate its worktree and continue its conversation" : "No saved session: Resume will say why it cannot" }));
     if (this.clickOpens(c)) b.push(button(`ed-${u}`, "✎", () => this.edit(c), { tone: t.muted, tip: "Open the card" }));
     return b;
   }
