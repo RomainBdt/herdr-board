@@ -58,7 +58,7 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
 - `none`: no git requirement (Q&A, investigation, reporting). Finish when "Done looks like" is satisfied and put the answer or findings in the `done` summary. Do not push or open a PR.
 - `local`: the change is committed on your branch. No review, no push.
 - `local-reviewed`: committed, then review your own diff with fresh eyes (run `/code-review` if available), fix what it
-  finds, commit again. No push.
+  finds, commit again. No push. Log what you do not fix (see "Review findings that are not fixed").
 - `draft-pr`: push the branch and open a draft pull request (`gh pr create --draft`) with a clear description.
 - `pr-ready`: run `/ship` (review + pull request), until the PR is ready to merge and its checks pass.
 - `merged`: as `pr-ready`, then merge it once checks pass and the repo's rules allow it.
@@ -70,3 +70,13 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
 
 Then run `done` (with `--state` if the target was not fully reached) and a summary: what changed, decisions you made alone, anything the person should check, and the
 PR link if there is one. Your session stays open afterwards; the person may come back to it.
+
+## Review findings that are not fixed
+
+- Applies to every review you run (`/ship` step 2, `/code-review` for `local-reviewed`, any other self-review).
+- Every review finding that is confirmed valid and that you do not fix in this change (out of scope, not worth fixing now)
+  must be saved as a GitHub issue: one `gh issue create` per finding (file:line, what is wrong, suggested fix, the card id),
+  after checking `gh issue list --search "<title>" --state open` so you never create a duplicate.
+- Do not open issues for false positives or for findings you fixed.
+- Link the issues in the PR note (when there is a PR) and in the `done` summary.
+- Only when the repo has a remote and `gh` works. Otherwise (no remote, or `gh` fails) list those findings in the `done` summary.
