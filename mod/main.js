@@ -182,7 +182,7 @@ export default class HerdrBoard extends View {
   allCards() {
     const boards = this.boards(), multi = boards.length > 1;
     return boards.flatMap((b) => (b.data?.cards ?? []).map((c) =>
-      ({ ...c, conn: b.conn, boardLabel: b.label, multi, key: `${connKey(b.conn)}|${c.id}`, uid: `b${b.i}-${safeId(c.id)}` })));
+      ({ ...c, clean: b.data.clean ?? {}, conn: b.conn, boardLabel: b.label, multi, key: `${connKey(b.conn)}|${c.id}`, uid: `b${b.i}-${safeId(c.id)}` })));
   }
 
   refresh(cx) { for (const c of conns()) this.refreshOne(cx, c); }
@@ -319,12 +319,21 @@ export default class HerdrBoard extends View {
   openSettings() {
     // what each board's board.json says, so the dialog shows it at once
     const server = Object.fromEntries(this.boards().filter((b) => b.data)
-      .map((b) => [connKey(b.conn), { maxParallel: b.data.maxParallel, plannerModel: b.data.plannerModel, autoStart: b.data.autoStart, name: b.data.board }]));
+      .map((b) => [connKey(b.conn), { maxParallel: b.data.maxParallel, plannerModel: b.data.plannerModel, autoStart: b.data.autoStart, clean: b.data.clean, name: b.data.board }]));
     openOverlay({ mod: "herdr-board", kind: "dialog", width: 600, height: 0.85, props: { dialog: "settings", server } });
   }
 
   // What clicking a card does, from the settings; the other action gets a button.
   clickOpens(c) { return S().click === "session" && Boolean(c.address); }
+
+  // What Clean will do on this card's board, from its settings.
+  cleanTip(o) {
+    const steps = ["stop its agent"];
+    if (o.worktree !== false) steps.push("remove its worktree");
+    if (o.branch !== false) steps.push("delete its branch");
+    if (o.archive !== false) steps.push("archive the card");
+    return steps.join(", ").replace(/^./, (x) => x.toUpperCase());
+  }
 
   cardButtons(c, cx) {
     const t = theme();
@@ -338,7 +347,7 @@ export default class HerdrBoard extends View {
     if (c.column === "needs-you" && !c.address)
       b.push(button(`rs-${u}`, "Restart", (cx) => this.act(cx, `Starting ${id}…`, ["start", id], 90000, on), { tip: "Start its agent again in the same worktree" }));
     if (c.address && !this.clickOpens(c)) b.push(button(`op-${u}`, "Open", () => this.open(c), { tip: "Open its live session and take over" }));
-    if (c.column === "done") b.push(button(`cl-${u}`, "Clean", (cx) => this.act(cx, `Cleaning ${id}…`, ["clean", id], undefined, on), { tone: t.muted, tip: "Stop its agent and remove its worktree (the branch stays)" }));
+    if (c.column === "done") b.push(button(`cl-${u}`, "Clean", (cx) => this.act(cx, `Cleaning ${id}…`, ["clean", id], undefined, on), { tone: t.muted, tip: this.cleanTip(c.clean) }));
     if (this.clickOpens(c)) b.push(button(`ed-${u}`, "✎", () => this.edit(c), { tone: t.muted, tip: "Open the card" }));
     return b;
   }
@@ -512,7 +521,7 @@ export default class HerdrBoard extends View {
 
   makeRow(cx, c, known) {
     const row = { n: this.serial++, machine: c.machine || "", maxParallel: known?.maxParallel ?? null,
-      plannerModel: known?.plannerModel ?? null, autoStart: known?.autoStart ?? null, name: known?.name ?? "" };
+      plannerModel: known?.plannerModel ?? null, autoStart: known?.autoStart ?? null, clean: known?.clean ?? null, name: known?.name ?? "" };
     row.script = InputState.new({ value: c.script });
     row.boardDir = InputState.new({ value: c.board });
     // the paths apply like every other setting: shortly after typing stops, and on closing
@@ -530,14 +539,14 @@ export default class HerdrBoard extends View {
   loadRow(cx, row) {
     const conn = this.rowConn(row);
     row.loaded = connKey(conn);
-    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, plannerModel: null, autoStart: null, name: "" }); return; }
+    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, plannerModel: null, autoStart: null, clean: null, name: "" }); return; }
     cx.spawn(async (cx) => {
       const r = await cli(conn, ["ls", "--json"]);
       if (connKey(this.rowConn(row)) !== connKey(conn)) return;   // changed meanwhile
       try {
         const d = JSON.parse(r.out);
-        Object.assign(row, { maxParallel: d.maxParallel, plannerModel: d.plannerModel, autoStart: d.autoStart, name: d.board });
-      } catch { Object.assign(row, { maxParallel: null, plannerModel: null, autoStart: null, name: "" }); }
+        Object.assign(row, { maxParallel: d.maxParallel, plannerModel: d.plannerModel, autoStart: d.autoStart, clean: d.clean ?? null, name: d.board });
+      } catch { Object.assign(row, { maxParallel: null, plannerModel: null, autoStart: null, clean: null, name: "" }); }
       cx.notify();
     });
   }
@@ -586,6 +595,7 @@ export default class HerdrBoard extends View {
       if (r.ok) {
         if (key === "autoStart") row.autoStart = { ...row.autoStart, enabled: value === "on" };
         else if (key === "autoInterval") row.autoStart = { ...row.autoStart, intervalMinutes: value };
+        else if (key.startsWith("clean")) row.clean = { worktree: true, branch: true, archive: true, ...row.clean, [key[5].toLowerCase() + key.slice(6)]: value === "on" };
         else row[key] = value;
       }
       setShared(BUMP, Date.now());
@@ -634,7 +644,15 @@ export default class HerdrBoard extends View {
           (v, cx) => this.serverSetting(cx, r, "autoStart", v))))
       .child(row("Auto-start every", "Minutes between checks",
         seg(`ai-${r.n}`, [1, 5, 10, 15, 30, 60].map((n) => [n, n === 60 ? "1 h" : `${n} min`]), r.autoStart?.intervalMinutes,
-          (v, cx) => this.serverSetting(cx, r, "autoInterval", v))));
+          (v, cx) => this.serverSetting(cx, r, "autoInterval", v))))
+      .child(row("Clean button", "What it does to a Done card; the agent is always stopped",
+        v_flex().gap(4)
+          .child(h_flex().gap(8).items_center().child(div().w(110).text_size(12).child("Remove worktree"))
+            .child(seg(`cw-${r.n}`, [["on", "On"], ["off", "Off"]], r.clean ? (r.clean.worktree ? "on" : "off") : null, (v, cx) => this.serverSetting(cx, r, "cleanWorktree", v))))
+          .child(h_flex().gap(8).items_center().child(div().w(110).text_size(12).child("Delete branch"))
+            .child(seg(`cb-${r.n}`, [["on", "On"], ["off", "Off"]], r.clean ? (r.clean.branch ? "on" : "off") : null, (v, cx) => this.serverSetting(cx, r, "cleanBranch", v))))
+          .child(h_flex().gap(8).items_center().child(div().w(110).text_size(12).child("Archive card"))
+            .child(seg(`ca-${r.n}`, [["on", "On"], ["off", "Off"]], r.clean ? (r.clean.archive ? "on" : "off") : null, (v, cx) => this.serverSetting(cx, r, "cleanArchive", v))))));
 
     return v_flex().id("settings").size_full().bg(t.popover).text_color(t.foreground)
       .on_key_down((e, cx) => { if (e.key === "escape") { this.closeSettings(); cx.stop_propagation(); } })
