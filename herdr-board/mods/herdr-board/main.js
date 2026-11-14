@@ -87,6 +87,14 @@ async function cli(c, args, timeout = 30000) {
   }
 }
 
+// Start a card's agent right away. An auto-start tick may have started it meanwhile: that counts as a success.
+async function startAndNotify(c, id, did) {
+  const s = await cli(c, ["start", id], 90000);
+  if (!s.ok && !/already running/.test(s.err))
+    notify({ title: `${id} was ${did} but did not start`, body: String(s.err).replace(/\s+/g, " ").slice(0, 700), level: "error" });
+  setShared(BUMP, Date.now());
+}
+
 const PRESSED = {};   // button id -> when a press last ran its action
 
 function button(id, text, action, { primary = false, tone = null, tip = null, dim = false } = {}) {
@@ -1027,13 +1035,7 @@ export default class HerdrBoard extends View {
       if (!r.ok) { this.creating = false; this.formBusy = ""; this.msg = r.err; cx.notify(); return; }
       setShared(BUMP, Date.now());
       closeOverlay(p.overlay);   // the start can take a while: do not keep the form open for it
-      if (startNow) {
-        const s = await cli(p, ["start", p.id], 90000);
-        // an auto-start tick may have started the card meanwhile: that is a success
-        if (!s.ok && !/already running/.test(s.err))
-          notify({ title: `${p.id} was saved but did not start`, body: String(s.err).replace(/\s+/g, " ").slice(0, 700), level: "error" });
-        setShared(BUMP, Date.now());
-      }
+      if (startNow) await startAndNotify(p, p.id, "saved");
     });
   }
 
@@ -1085,14 +1087,7 @@ export default class HerdrBoard extends View {
       }
       setShared(BUMP, Date.now());   // the card shows up on the board at once
       closeOverlay(p.overlay);       // the start can take a while: do not keep the form open for it
-      if (startNow) {
-        const s = await cli(c, ["start", id], 90000);
-        // an auto-start tick may have started the (approved) card between `new` and `start`: that is a success
-        if (!s.ok && !/already running/.test(s.err))
-          // the card exists and is approved: it will start when a slot is free, or start it from the board
-          notify({ title: `${id} was created but did not start`, body: String(s.err).replace(/\s+/g, " ").slice(0, 700), level: "error" });
-        setShared(BUMP, Date.now());
-      }
+      if (startNow) await startAndNotify(c, id, "created");   // the card exists and is approved: it will start when a slot is free, or start it from the board
     });
   }
 
@@ -1192,8 +1187,8 @@ export default class HerdrBoard extends View {
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.creating ? t.muted : t.blocked).child(this.msg))
         .child(button("n-cancel", this.existing && this.locked ? "Close" : "Cancel", () => closeOverlay(p.overlay)))
         .when(this.existing, (el) => el.child(button("n-text", "Edit as text", () => this.editText(), { tip: "Open the card's Markdown file" }))
-          .when(!this.locked && this.loaded, (e2) => e2.child(button("n-save", "Save", (cx) => this.saveForm(cx), { primary: this.form?.status !== "ready" }))
-            .when(this.form?.status === "ready", (e3) => e3.child(button("n-save-start", this.formBusy === "start" ? "Saving and starting…" : "Save and start", (cx) => this.saveForm(cx, true), { primary: true, dim: this.creating, tip: "Save the changes and start its agent right away" })))))
+          .when(!this.locked && this.loaded, (e2) => e2.child(button("n-save", "Save", (cx) => this.saveForm(cx), { primary: this.form?.status !== "ready", dim: this.creating }))
+            .when(this.form?.status === "ready", (e3) => e3.child(button("n-save-start", this.formBusy === "start" ? "Saving and starting…" : "Save and start", (cx) => this.saveForm(cx, true), { primary: true, dim: this.creating && this.formBusy !== "start", tip: "Save the changes and start its agent right away" })))))
         .when(!this.existing, (el) => el.child(button("n-help", this.formBusy === "help" ? "Starting…" : "Create with agent", (cx) => this.help(cx), { tip: "A chat agent asks what is missing and fills the empty fields", dim: this.creating && this.formBusy !== "help" }))
           .child(button("n-create", this.formBusy === "create" ? "Creating…" : "Create card", (cx) => this.create(cx), { primary: true, dim: this.creating && this.formBusy !== "create" }))
           .child(button("n-start", this.formBusy === "start" ? "Creating and starting…" : "Create and start", (cx) => this.create(cx, true), { dim: this.creating && this.formBusy !== "start", primary: true, tip: "Create the card and start its agent right away. Create card leaves it in To do until you approve it" }))));
