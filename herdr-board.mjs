@@ -969,7 +969,7 @@ function cmdShow(board, [id]) {
   }));
 }
 
-// Change a card that has not started: title, finish-with, model, effort and the three text sections.
+// Change a card that has not started (To do or Ready): title, finish-with, model, effort and the three text sections.
 function cmdUpdate(board, args) {
   const hash = takeFlag(args, '--hash');
   const fields = takeFlag(args, '--fields');
@@ -977,7 +977,7 @@ function cmdUpdate(board, args) {
   if (!id || !fields || !hash) die('usage: update <id> --hash <h> --fields <enc>');
   const card = loadCard(board, id);
   if (textHash(readFileSync(card.path, 'utf8')) !== hash) die('the card changed since you opened it (an agent may have updated it). Close the panel and open it again.');
-  if ((card.meta.status || 'todo') !== 'todo') die(`${card.id} has started: it can no longer be changed from the form`);
+  if (!['todo', 'ready'].includes(card.meta.status || 'todo')) die(`${card.id} has started: it can no longer be changed from the form`);
   let f;
   try { f = JSON.parse(decodeURIComponent(fields)); } catch { die('--fields is not valid encoded JSON'); }
   if (f.model && !MODELS.includes(f.model)) die(`model must be one of ${MODELS.join(', ')}`);
