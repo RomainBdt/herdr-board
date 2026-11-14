@@ -858,7 +858,7 @@ export default class HerdrBoard extends View {
   help(cx) {
     const p = props();
     if (this.creating) return;
-    if (!this.pick) { this.errs = { ...this.errs, repo: "Pick a repo." }; cx.notify(); return; }
+    if (!this.pick) { this.errs = { ...this.errs, repo: "Pick a repo." }; this.msg = ""; cx.notify(); return; }
     const fields = encodeURIComponent(JSON.stringify({
       done: this.done, model: this.model, effort: this.effort,
       context: this.context.value(), constraints: this.constraints.value(), doneLooks: this.doneLooks.value(),
