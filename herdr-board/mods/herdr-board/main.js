@@ -111,17 +111,30 @@ function button(id, text, action, { primary = false, tone = null, tip = null, di
 // the question itself and its options, so the dialog can show them apart. No options found: {stem: q, options: []}.
 function parseQuestion(q) {
   const text = String(q ?? "").trim();
-  const mark = text.match(/\boptions?\s*:|\(\s*(?:a|1)\s*\)/i);
+  // "Options:" starts the list anywhere; a bare "(a)" / "(1)" only does at the start of a sentence, not inside "Should I use (a) X or (b) Y?"
+  const mark = text.match(/\boptions?\s*:|(?:^|(?<=[.?!:]\s))\(\s*(?:a|1)\s*\)/i);
   if (!mark) return { stem: text, options: [] };
   const head = text.slice(0, mark.index).trim();
   const rest = text.slice(mark.index + (/^options?/i.test(mark[0]) ? mark[0].length : 0)).trim();
   let tail = "";
-  const parts = rest.split(/\(\s*([a-z]|\d{1,2})\s*\)/i);   // [before, key, text, key, text, ...]
   const options = [];
-  if (parts.length >= 5) {
-    for (let i = 1; i + 1 < parts.length; i += 2) options.push({ key: parts[i].toLowerCase(), text: parts[i + 1] });
+  // keyed options "(a) X (b) Y": a key counts only when it is the next one in sequence, so "file(s)" or "(see docs)" stay in the text
+  const keyRe = /\(\s*([a-z]|\d{1,2})\s*\)/gi;
+  const first = rest.match(/^\(\s*([a-z]|\d{1,2})\s*\)/i);
+  if (first) {
+    const numeric = /\d/.test(first[1]);
+    const keyOf = (n) => (numeric ? String(n + 1) : String.fromCharCode(97 + n));
+    let at = -1;
+    for (let m; (m = keyRe.exec(rest)); ) {
+      if (m[1].toLowerCase() !== keyOf(options.length)) continue;
+      if (options.length) options[options.length - 1].text = rest.slice(at, m.index);
+      options.push({ key: m[1].toLowerCase(), text: "" });
+      at = m.index + m[0].length;
+    }
+    if (options.length) options[options.length - 1].text = rest.slice(at);
   } else {
-    rest.split(/\s*;\s*|,\s+(?:or\s+)?|\s+or\s+/).forEach((o, i) => options.push({ key: String.fromCharCode(97 + i), text: o }));
+    // no keys: split on ";" when there is one, else on commas / "or"
+    rest.split(rest.includes(";") ? /\s*;\s*/ : /,\s+(?:or\s+)?|\s+or\s+/).forEach((o, i) => options.push({ key: String.fromCharCode(97 + i), text: o }));
   }
   if (options.length < 2) return { stem: text, options: [] };
   const last = options[options.length - 1];
@@ -130,6 +143,7 @@ function parseQuestion(q) {
   for (const o of options) {
     o.text = o.text.trim().replace(/^[:,;\s]+|[;,\s]+$/g, "").replace(/^or\s+/i, "").replace(/\.$/, "").trim();
     o.recommended = /recommend/i.test(o.text);
+    o.text = o.text.replace(/\s*[(\[]\s*(?:my\s+)?recommended\s*[)\]]/i, "").trim();   // the "recommended" tag shows it; the answer sent stays plain
   }
   const good = options.filter((o) => o.text);
   if (good.length < 2) return { stem: text, options: [] };
