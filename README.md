@@ -151,6 +151,7 @@ board/                       the board folder, on the server
   cards/DEMO-1.md            one card per file
 <folder>/                    the code, copied there by ./deploy.sh <machine> <folder>
   herdr-board.mjs            the CLI (Node, no packages)
+  check.mjs                  validates a change locally and over the fake SSH machine
   rules.md                   what every card agent is told (autonomy, questions, done targets)
   card-template.md           a new card
   draft-rules.md             what the "Create with agent" chat is told
@@ -289,7 +290,37 @@ node tests/run.mjs
 
 (`node --test` also works on Node 21+.) The tests use a throwaway board in the system temp folder and hide `hc`
 and `claude` from the CLI they run, so they never touch your real board or start an agent. `tests/unit.test.mjs` covers the card
-logic (parsing, template fields, next action, board column); `tests/cli.test.mjs` runs `new`, `done`, `where` and `ask`.
+logic (parsing, template fields, next action, board column); `tests/cli.test.mjs` runs `new`, `done`, `where` and `ask`;
+`tests/check.test.mjs` covers `check.mjs` (below) with a stub in place of ssh.
+
+## Validating a change: locally and over the fake SSH machine
+
+A card that changes herdr-board or herdr-app is checked in two places, and the card agent's rules (`rules.md`) tell it to
+report both in its `done` summary. One command does both and prints PASS or FAIL for each side:
+
+```
+node check.mjs [--dir <repo folder>] [--cmd "<command>"]
+```
+
+```
+check: node tests/run.mjs   (in C:/Users/me/herdr-worktrees/HB-1)
+local   PASS  (2.0s)
+remote  PASS  (2.3s)
+check: PASS
+```
+
+- **local** runs the command here (default `node tests/run.mjs`, else `npm test`; `--cmd` for anything else).
+- **remote** runs the same command through the *fake SSH machine*: a second `sshd` on this PC (`~/fake-server/`:
+  `sshd_config`, `id_fake`, `hostkey`, `authorized_keys`; override the folder with `HERDR_FAKE_SERVER`). It is the same
+  computer, so the same folder is used on both sides. Needs Windows OpenSSH (or `sshd` on the PATH) and the key set
+  up in that folder.
+- Exit code `0` both passed, `1` a side failed (the end of its output is printed), `2` the check could not run.
+  `--skip-local` / `--skip-remote` check one side only.
+- It leaves nothing behind: it starts **its own** sshd on a free port with no window, and stops it and every ssh
+  session when it ends (even on Ctrl+C). An sshd that is already running is neither used nor stopped. It never touches
+  `~/.ssh/config` and does not use the `fakeserver` alias, so Herdr does not see it and does not open (or reopen) an
+  empty cmd.exe window.
+- Only the fake machine is used, never a real remote one.
 
 ## Licenses and notices
 
