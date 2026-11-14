@@ -107,6 +107,49 @@ function button(id, text, action, { primary = false, tone = null, tip = null, di
     .child(text);
 }
 
+// A question is one line of text, written like "Which one? Options: (a) X (recommended); (b) Y; (c) Z". Split it into
+// the question itself and its options, so the dialog can show them apart. No options found: {stem: q, options: []}.
+function parseQuestion(q) {
+  const text = String(q ?? "").trim();
+  // "Options:" starts the list anywhere; a bare "(a)" / "(1)" only does at the start of a sentence, not inside "Should I use (a) X or (b) Y?"
+  const mark = text.match(/\boptions?\s*:|(?:^|(?<=[.?!:]\s))\(\s*(?:a|1)\s*\)/i);
+  if (!mark) return { stem: text, options: [] };
+  const head = text.slice(0, mark.index).trim();
+  const rest = text.slice(mark.index + (/^options?/i.test(mark[0]) ? mark[0].length : 0)).trim();
+  let tail = "";
+  const options = [];
+  // keyed options "(a) X (b) Y": a key counts only when it is the next one in sequence, so "file(s)" or "(see docs)" stay in the text
+  const keyRe = /\(\s*([a-z]|\d{1,2})\s*\)/gi;
+  const first = rest.match(/^\(\s*([a-z]|\d{1,2})\s*\)/i);
+  if (first) {
+    const numeric = /\d/.test(first[1]);
+    const keyOf = (n) => (numeric ? String(n + 1) : String.fromCharCode(97 + n));
+    let at = -1;
+    for (let m; (m = keyRe.exec(rest)); ) {
+      if (m[1].toLowerCase() !== keyOf(options.length)) continue;
+      if (options.length) options[options.length - 1].text = rest.slice(at, m.index);
+      options.push({ key: m[1].toLowerCase(), text: "" });
+      at = m.index + m[0].length;
+    }
+    if (options.length) options[options.length - 1].text = rest.slice(at);
+  } else {
+    // no keys: split on ";" when there is one, else on commas / "or"
+    rest.split(rest.includes(";") ? /\s*;\s*/ : /,\s+(?:or\s+)?|\s+or\s+/).forEach((o, i) => options.push({ key: String.fromCharCode(97 + i), text: o }));
+  }
+  if (options.length < 2) return { stem: text, options: [] };
+  const last = options[options.length - 1];
+  const cut = last.text.match(/^(.*?[.)])\s+([A-Z][^.?!]*\?)\s*$/s);   // a closing "Which one?" belongs to the question
+  if (cut) { last.text = cut[1]; tail = cut[2]; }
+  for (const o of options) {
+    o.text = o.text.trim().replace(/^[:,;\s]+|[;,\s]+$/g, "").replace(/^or\s+/i, "").replace(/\.$/, "").trim();
+    o.recommended = /recommend/i.test(o.text);
+    o.text = o.text.replace(/\s*[(\[]\s*(?:my\s+)?recommended\s*[)\]]/i, "").trim();   // the "recommended" tag shows it; the answer sent stays plain
+  }
+  const good = options.filter((o) => o.text);
+  if (good.length < 2) return { stem: text, options: [] };
+  return { stem: [head, tail].filter(Boolean).join(" "), options: good };
+}
+
 export default class HerdrBoard extends View {
   init(_props, cx) {
     const p = props() ?? {};
@@ -838,6 +881,8 @@ export default class HerdrBoard extends View {
 
   initAnswer(cx) {
     this.msg = "";
+    this.picks = {};   // question index -> chosen option
+    this.parsed = (props().questions ?? []).map(parseQuestion);
     this.handle = cx.focus_handle();
     this.reply = EditorState.new({ language: "markdown", value: "", soft_wrap: true, line_numbers: false, folding: false,
       font_family: settings().font_family, font_size: 13 });
@@ -845,8 +890,9 @@ export default class HerdrBoard extends View {
 
   send(cx) {
     const p = props();
-    const text = this.reply.value().trim();
-    if (!text) { this.msg = "Write your answers first."; cx.notify(); return; }
+    const picked = Object.keys(this.picks).map(Number).sort((a, b) => a - b).map((i) => `${i + 1}. ${this.picks[i].text}`);
+    const text = [...picked, this.reply.value().trim()].filter(Boolean).join("\n");
+    if (!text) { this.msg = "Pick an option or write your answer first."; cx.notify(); return; }
     this.msg = "Sending…";
     cx.notify();
     cx.spawn(async (cx) => {
@@ -867,12 +913,28 @@ export default class HerdrBoard extends View {
         .child(div().text_size(14).font_semibold().text_color(p.color).child(p.id))
         .child(div().flex_1().min_w(0).truncate().text_size(14).font_semibold().child(p.title))
         .child(div().text_size(11).text_color(t.dim).child("Esc closes")))
-      .child(v_flex().px(16).py(12).gap(8).flex_shrink_0()
-        .children(qs.map((q, i) => h_flex().gap(8).items_start()
-          .child(div().flex_shrink_0().text_size(12.5).font_semibold().text_color(t.blocked).child(`${i + 1}.`))
-          .child(div().flex_1().min_w(0).text_size(12.5).child(q)))))
-      .child(div().px(16).pb(6).text_size(11.5).text_color(t.dim).child("Your answers (one line per question is fine: \"1. MIT  2. Jane Doe\")"))
-      .child(div().flex_1().min_h(0).mx(16).rounded(8).border_1().border_color(t.input).bg(t.background).p(6)
+      .child(v_flex().id("a-questions").px(16).py(12).gap(12).flex_1().min_h(0).overflow_y_scrollbar()
+        .children(qs.map((q, i) => {
+          const { stem, options } = this.parsed[i] ?? parseQuestion(q);
+          const chosen = this.picks[i];
+          return v_flex().gap(6)
+            .child(h_flex().gap(8).items_start().px(10).py(8).rounded(8).bg(t.raised).border_l(3).border_color(t.blocked)
+              .child(div().flex_shrink_0().text_size(14).font_semibold().text_color(t.blocked).child(`${i + 1}.`))
+              .child(div().flex_1().min_w(0).text_size(14).font_semibold().child(stem)))
+            .children(options.map((o) => {
+              const on = chosen?.key === o.key;
+              return h_flex().id(`a-opt-${i}-${o.key}`).gap(8).items_start().ml(14).px(10).py(6).rounded(6).cursor_pointer()
+                .border_1().border_color(on ? t.solid : t.border).bg(on ? t.solid : t.background)
+                .text_color(on ? t.solid_foreground : t.foreground)
+                .hover((s) => s.opacity(0.85))
+                .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); if (this.picks[i]?.key === o.key) delete this.picks[i]; else this.picks[i] = o; this.msg = ""; cx.notify(); })
+                .child(div().flex_shrink_0().w(18).text_size(12).font_semibold().child(o.key.toUpperCase()))
+                .child(div().flex_1().min_w(0).text_size(12.5).child(o.text))
+                .when(o.recommended, (el) => el.child(div().flex_shrink_0().text_size(10.5).font_medium().opacity(0.8).child("recommended")));
+            }));
+        })))
+      .child(div().px(16).pb(6).text_size(11.5).text_color(t.dim).child("Click an option above, or write your own answer below (\"1. MIT  2. Jane Doe\"). Both are sent."))
+      .child(div().h(110).flex_shrink_0().mx(16).rounded(8).border_1().border_color(t.input).bg(t.background).p(6)
         .child(Editor.new(this.reply).size_full()))
       .child(h_flex().px(16).h(52).gap(8).items_center()
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(this.msg === "Sending…" ? t.muted : t.blocked).child(this.msg))
