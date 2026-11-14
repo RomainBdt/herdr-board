@@ -1,6 +1,6 @@
 // herdr-board panel: the cards of one or more boards (this computer, machines over ssh), read from each one's herdr-board CLI.
 // The layout has two slots for it, props {slot: "side"} (a column beside the sidebar) and {slot: "top"}
-// (five columns above the tabs); the Position setting picks one and only that copy runs.
+// (six columns above the tabs); the Position setting picks one and only that copy runs.
 // The same mod also draws its dialogs (settings, card editor, answers, new card) when opened as an overlay.
 // Settings live in Herdr's shared state ("herdr-board.settings"), so the tab bar's Board button sees them too.
 import { View, div } from "gpui-kit";
@@ -8,7 +8,7 @@ import { v_flex, h_flex, InputState, Input, EditorState, Editor, TextareaState, 
 import { exec, run, props, theme, settings, notify, playSound, openOverlay, closeOverlay, readTextFile, shared, setShared, agents, nextCommand, layout, machines } from "herdr";
 
 const COLUMNS = [
-  ["todo", "To do"], ["ready", "Ready"], ["running", "Running"], ["needs-you", "Needs you"], ["done", "Done"],
+  ["todo", "To do"], ["ready", "Ready"], ["running", "Running"], ["needs-you", "Needs you"], ["done", "Done"], ["archived", "Archived"],
 ];
 // the board's "done:" targets and their labels (the New card chips and the Done tag both use them)
 const FINISH_WITH = [["local", "Local commit"], ["local-reviewed", "Local + review"], ["draft-pr", "Draft PR"], ["pr-ready", "PR ready"], ["merged", "Merged"]];
@@ -25,6 +25,7 @@ const DEFAULTS = {
   click: "session",                  // what clicking a card does: session (open its live session) | card
   compact: true,                     // To do, Ready and Done cards on one line
   showDone: true,
+  showArchived: true,
   refresh: 5,                        // seconds between reads of the board
   notifyNeeds: true,                 // toast + sound when a card needs you
   notifyDone: false,                 // Herdr already says when an agent finishes
@@ -46,6 +47,9 @@ function findNode(node, id) {
   for (const child of node?.children ?? []) { const f = findNode(child, id); if (f) return f; }
   return null;
 }
+
+// Done and Archived can be hidden in the settings
+function shown(col) { return col === "done" ? S().showDone : col === "archived" ? S().showArchived : true; }
 
 function S() { return { ...DEFAULTS, ...(shared(SETTINGS) ?? {}) }; }
 function setS(patch) { setShared(SETTINGS, { ...(shared(SETTINGS) ?? {}), ...patch }); }
@@ -364,15 +368,15 @@ export default class HerdrBoard extends View {
         .child(div().flex_shrink_0().w(12).child(icon)).child(div().min_w(0).truncate().child(text));
     const model = c.model ? `${c.model} · ${c.effort}` : c.proposed ? `proposed ${c.proposed.model} · ${c.proposed.effort}` : "not planned";
     const rows = [];
-    const compact = S().compact && ["todo", "ready", "done"].includes(c.column);   // one line + buttons
+    const compact = S().compact && ["todo", "ready", "done", "archived"].includes(c.column);   // one line + buttons
     if (compact) {
       // title and buttons only
     } else if (c.column === "todo" || c.column === "ready") {
       if (c.proposed?.note) rows.push(line("💡", `#${c.proposed.order} ${c.proposed.note}`, t.dim));
     } else {
       rows.push(line("◎", c.where.goal, t.foreground));
-      if (c.column !== "done") rows.push(line("✓", c.where.done));
-      rows.push(line("→", c.column === "done" ? "" : c.where.next, t.accent));
+      if (c.column !== "done" && c.column !== "archived") rows.push(line("✓", c.where.done));
+      rows.push(line("→", c.column === "done" || c.column === "archived" ? "" : c.where.next, t.accent));
     }
     if (c.column === "needs-you") {
       if (c.note) rows.push(line("⚠", c.note, t.blocked));
@@ -446,7 +450,7 @@ export default class HerdrBoard extends View {
     return v_flex().id("board").size_full().bg(t.chrome).text_color(t.foreground)
       .child(header)
       .child(!configured() ? this.emptyState()
-        : h_flex().flex_1().min_h(0).p(8).gap(8).children(COLUMNS.filter(([k]) => k !== "done" || S().showDone).map(column)));
+        : h_flex().flex_1().min_h(0).p(8).gap(8).children(COLUMNS.filter(([k]) => shown(k)).map(column)));
   }
 
   // Shown instead of the columns until a board is set up.
@@ -457,7 +461,7 @@ export default class HerdrBoard extends View {
       .child(button("b-conn", "Open settings", () => this.openSettings(), { primary: true }));
   }
 
-  cards() { return this.allCards().filter((c) => c.column !== "done" || S().showDone); }
+  cards() { return this.allCards().filter((c) => shown(c.column)); }
 
   // Header bits for both layouts: the title, "2/3 running" per board, one error line per board.
   heading() { const b = this.boards(); return b.length === 1 ? b[0].data?.board || "Board" : "Boards"; }
@@ -477,7 +481,9 @@ export default class HerdrBoard extends View {
   folded() {
     if (!this._folded) {
       try { this._folded = JSON.parse(localStorage.getItem("folded") ?? "null"); } catch { this._folded = null; }
-      this._folded ??= { done: true };
+      // defaults first: a folded state saved before Archived existed must not open it
+      const saved = this._folded && typeof this._folded === "object" ? this._folded : {};
+      this._folded = { done: true, archived: true, ...saved };
     }
     return this._folded;
   }
@@ -509,7 +515,7 @@ export default class HerdrBoard extends View {
       .when(Boolean(this.busy), (el) => el.child(div().text_size(11.5).text_color(t.working).child(this.busy)))
       .children(errors.map((e) => div().text_size(11.5).text_color(t.blocked).child(`⚠ ${e}`)));
 
-    const order = ["needs-you", "running", "ready", "todo", "done"].filter((k) => k !== "done" || S().showDone);
+    const order = ["needs-you", "running", "ready", "todo", "done", "archived"].filter(shown);
     const labels = Object.fromEntries(COLUMNS);
     const section = (key) => {
       const list = cards.filter((c) => c.column === key);
@@ -687,8 +693,9 @@ export default class HerdrBoard extends View {
       .child(row("Position", "Show or hide it with the Board button in the tab bar",
         seg("pos", [["side", "Beside the sidebar"], ["top", "Across the top"]], s.position, (v) => this.setPosition(v))))
       .child(row("Clicking a card", null, seg("click", [["session", "Opens its live session"], ["card", "Opens the card"]], s.click, (v) => setS({ click: v }))))
-      .child(row("Compact cards", "To do, Ready and Done on one line", onOff("compact", "compact")))
+      .child(row("Compact cards", "To do, Ready, Done and Archived on one line", onOff("compact", "compact")))
       .child(row("Show Done", null, onOff("done", "showDone")))
+      .child(row("Show Archived", "Cleaned cards", onOff("archived", "showArchived")))
       .child(row("Refresh every", null, seg("refresh", [[5, "5 s"], [15, "15 s"], [60, "1 min"]], s.refresh, (v) => setS({ refresh: v }))))
       .child(title("Alerts"))
       .child(row("Card needs you", "Toast with its first question, and a sound", onOff("nn", "notifyNeeds")))
