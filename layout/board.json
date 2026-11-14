@@ -82,13 +82,30 @@
       ]
     },
     {
+      "id": "board-side",
+      "type": "block",
+      "size": {
+        "px": 330
+      },
+      "min": 260,
+      "max": 520,
+      "background": "chrome",
+      "content": {
+        "mod": "herdr-board",
+        "props": {
+          "slot": "side"
+        }
+      }
+    },
+    {
       "id": "work",
       "type": "column",
       "resizable": true,
       "children": [
         {
-          "id": "board",
+          "id": "board-top",
           "type": "block",
+          "hidden": true,
           "size": {
             "px": 330
           },
@@ -97,9 +114,7 @@
           "content": {
             "mod": "herdr-board",
             "props": {
-              "machine": "server",
-              "script": "C:/fake-server/herdr-board/herdr-board.mjs",
-              "board": "C:/fake-server/board"
+              "slot": "top"
             }
           }
         },
@@ -116,7 +131,7 @@
               },
               "window_drag": true,
               "content": {
-                "mod": "tabs"
+                "mod": "herdr-board-tabs"
               }
             },
             {

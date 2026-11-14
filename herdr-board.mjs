@@ -224,7 +224,7 @@ function cmdLs(board, args) {
   const running = cards.filter(c => c.column === 'running').length;   // same rule as the queue's free slots
   if (args.includes('--json')) {
     const repos = Object.fromEntries(Object.entries(board.repos).map(([k, r]) => [k, r.color || '#888888']));
-    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, running, repos, cards }, null, 2));
+    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, plannerModel: board.plannerModel || 'sonnet', running, repos, cards }, null, 2));
     return;
   }
   console.log(`${board.name || 'board'}: ${running}/${board.maxParallel} running`);
@@ -496,6 +496,23 @@ function cmdSave(board, [id, encoded, expected]) {
   console.log(`${id.toUpperCase()}: saved`);
 }
 
+// The panel's settings that belong to the board itself: config maxParallel 3 | config plannerModel opus
+function cmdConfig(board, [key, value]) {
+  const file = join(board.dir, 'board.json');
+  const raw = JSON.parse(readFileSync(file, 'utf8'));
+  if (key === 'maxParallel') {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > 10) die('maxParallel must be a whole number from 1 to 10');
+    raw.maxParallel = n;
+  } else if (key === 'plannerModel') {
+    if (!MODELS.includes(value)) die(`plannerModel must be one of ${MODELS.join(', ')}`);
+    raw.plannerModel = value;
+  } else die('usage: config maxParallel <1-10> | config plannerModel <haiku|sonnet|opus>');
+  writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
+  console.log(`${key} = ${raw[key]}`);
+  if (key === 'maxParallel') startNext(loadBoard(board.dir), { quiet: true });   // more room: start what waits
+}
+
 function cmdClean(board, [id]) {
   if (!id) die('usage: clean <id>   (stops its agent and removes its worktree; keeps the branch)');
   const card = loadCard(board, id);
@@ -517,7 +534,7 @@ const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD ||
 const [cmd, ...rest] = argv;
 const commands = {
   new: cmdNew, ls: cmdLs, plan: cmdPlan, approve: cmdApprove, next: (b) => startNext(b), start: cmdStart,
-  answer: cmdAnswer, clean: cmdClean, save: cmdSave, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+  answer: cmdAnswer, clean: cmdClean, save: cmdSave, config: cmdConfig, where: cmdWhere, ask: cmdAsk, done: cmdDone,
 };
 if (!cmd || !commands[cmd]) {
   console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));

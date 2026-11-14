@@ -74,16 +74,40 @@ start it while you are signed in at the desktop). `Stop-Service sshd` when done 
 
 ## The board panel (Herdr, on the laptop)
 
-`./install.sh` copies the panel mod (`mod/` → `~/.config/herdr-app/mods/herdr-board`) and the `board` layout (Herdr's
-main layout with the board across the top of the work area). Pick it with `Ctrl+Shift+L`. Set the board block's
-`props` in `layouts/board.json`: `machine` (from `hc machine ls`), `script` and `board` (paths on that machine).
+`./install.sh` installs two mods and one layout into `~/.config/herdr-app`:
 
-- Five columns; each card shows its repo color, model, done target and its 3 "where we are" lines
-  (◎ goal, ✓ done, → next). Questions show on the card in **Needs you**.
-- **Open** jumps to the card's live session: type to take over. Each card's tab is named after it.
-- **Answer** shows the questions with a box for your answers; **Send answers** delivers them to the session.
-- Clicking a card opens the full card in an editor (saved on the server; refused if an agent changed it meanwhile).
-- **+ New card**, **Plan**, **Start next** in the header. A toast and a sound when a card needs you or is done.
-- Keys you can bind in `keys.json`: `herdr-board.answer` (first card with questions), `herdr-board.jump`
-  (its session), `herdr-board.refresh`.
-- It reads `herdr-board ls --json` from the server every 5 seconds.
+- `herdr-board`: the board. The `board` layout has two places for it, `board-side` (a column between the sidebar
+  and the chat) and `board-top` (five columns above the tabs); the Position setting picks one.
+- `herdr-board-tabs`: a copy of Herdr's tab bar with a **Board** button next to Files and Changes. It shows or hides
+  the board, with a red count of cards that need you while it is hidden. It is a copy: Herdr updates to its own tab
+  bar don't reach it (`mod-tabs/` holds it; redo the copy with `herdr-app do mod.clone` and re-add the button if
+  Herdr's changes).
+
+Pick the layout with `Ctrl+Shift+L`. Bind `"ctrl-alt-b": "herdr-board-tabs.toggle"` in `keys.json` to show or hide
+it from the keyboard (not Ctrl+B: Claude Code uses it).
+
+### Settings (⚙ on the board)
+
+| | |
+|---|---|
+| Position | beside the sidebar, or across the top |
+| Clicking a card | opens its live session (✎ opens the card), or opens the card (an Open button opens the session) |
+| Compact cards | To do, Ready and Done on one line |
+| Show Done | |
+| Refresh every | 5 s, 15 s, 1 min |
+| Alerts | toast + sound when a card needs you; when one is done (off by default: Herdr already tells you) |
+| Agents at once, Planner model | saved in the server's `board.json` (`herdr-board config ...`) |
+| Connection | machine, path of `herdr-board.mjs` and of the board folder on it |
+
+Display and connection settings are kept in Herdr's shared state (`herdr-board.settings`).
+
+### Using it
+
+- Each card shows its repo color, model, done target and its 3 "where we are" lines (◎ goal, ✓ done, → next).
+  Questions show on the card in **Needs you**. Beside the sidebar, sections go most urgent first and fold
+  (Done starts folded).
+- **Answer** shows the questions with a box for your answers; **Send answers** delivers them to the live session.
+- The card editor saves on the server and refuses if an agent changed the card meanwhile.
+- **+**, **Plan**, **▶ Start next** in the header. Each card's tab is named after the card.
+- Commands for `keys.json`: `herdr-board.answer` (first card with questions), `herdr-board.jump` (its session),
+  `herdr-board.settings`, `herdr-board.refresh`, `herdr-board-tabs.toggle`.
