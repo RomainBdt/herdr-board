@@ -1,6 +1,6 @@
 // herdr-board panel: the cards of one or more boards (this computer, machines over ssh), read from each one's herdr-board CLI.
 // The layout has two slots for it, props {slot: "side"} (a column beside the sidebar) and {slot: "top"}
-// (five columns above the tabs); the Position setting picks one and only that copy runs.
+// (six columns above the tabs); the Position setting picks one and only that copy runs.
 // The same mod also draws its dialogs (settings, card editor, answers, new card) when opened as an overlay.
 // Settings live in Herdr's shared state ("herdr-board.settings"), so the tab bar's Board button sees them too.
 import { View, div } from "gpui-kit";
@@ -481,7 +481,9 @@ export default class HerdrBoard extends View {
   folded() {
     if (!this._folded) {
       try { this._folded = JSON.parse(localStorage.getItem("folded") ?? "null"); } catch { this._folded = null; }
-      this._folded ??= { done: true, archived: true };
+      // defaults first: a folded state saved before Archived existed must not open it
+      const saved = this._folded && typeof this._folded === "object" ? this._folded : {};
+      this._folded = { done: true, archived: true, ...saved };
     }
     return this._folded;
   }
@@ -691,7 +693,7 @@ export default class HerdrBoard extends View {
       .child(row("Position", "Show or hide it with the Board button in the tab bar",
         seg("pos", [["side", "Beside the sidebar"], ["top", "Across the top"]], s.position, (v) => this.setPosition(v))))
       .child(row("Clicking a card", null, seg("click", [["session", "Opens its live session"], ["card", "Opens the card"]], s.click, (v) => setS({ click: v }))))
-      .child(row("Compact cards", "To do, Ready and Done on one line", onOff("compact", "compact")))
+      .child(row("Compact cards", "To do, Ready, Done and Archived on one line", onOff("compact", "compact")))
       .child(row("Show Done", null, onOff("done", "showDone")))
       .child(row("Show Archived", "Cleaned cards", onOff("archived", "showArchived")))
       .child(row("Refresh every", null, seg("refresh", [[5, "5 s"], [15, "15 s"], [60, "1 min"]], s.refresh, (v) => setS({ refresh: v }))))

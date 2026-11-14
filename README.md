@@ -111,7 +111,7 @@ Skip `deploy.sh` then: set **Board CLI** to the `herdr-board.mjs` in this checko
 `./install.sh` installs two mods and one layout into `~/.config/herdr-app`:
 
 - `herdr-board`: the board. The `board` layout has two places for it, `board-side` (a column between the sidebar
-  and the chat) and `board-top` (five columns above the tabs); the Position setting picks one.
+  and the chat) and `board-top` (six columns above the tabs); the Position setting picks one.
 - `herdr-board-tabs`: a copy of Herdr's tab bar with a **Board** button next to Files and Changes. It shows or hides
   the board, with a red count of cards that need you while it is hidden. It is a copy: Herdr updates to its own tab
   bar don't reach it (`mod-tabs/` holds it; redo the copy with `herdr-app do mod.clone` and re-add the button if
@@ -126,8 +126,9 @@ it from the keyboard (not Ctrl+B: Claude Code uses it).
 |---|---|
 | Position | beside the sidebar, or across the top |
 | Clicking a card | opens its live session (✎ opens the card), or opens the card (an Open button opens the session) |
-| Compact cards | To do, Ready and Done on one line |
+| Compact cards | To do, Ready, Done and Archived on one line |
 | Show Done | |
+| Show Archived | cleaned cards, in their own column (folded by default in the side panel) |
 | Refresh every | 5 s, 15 s, 1 min |
 | Alerts | toast + sound when a card needs you; when one is done (off by default: Herdr already tells you) |
 | Auto-start / Auto-start every | per board, saved in its `board.json`: on or off, and 1, 5, 10, 15, 30 or 60 minutes |
