@@ -32,7 +32,7 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
 
 - Your current folder is a git worktree on branch `card/{{id}}`, made for this card. Work and commit only here.
 - Never touch the main checkout, other worktrees, or other cards.
-- Commit in small, clear steps with messages that start with `{{id}}: `.
+- Commit in small, clear steps with messages that start with `{{id}}: ` (except for a `report` target: no commits).
 
 ## Reaching the "done" target (the card's `done:` field)
 

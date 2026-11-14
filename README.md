@@ -63,7 +63,7 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | you | `answer <id> ["text"]` | send your answers to the live session |
 | you | `ls [--json]` | the board; `--json` is what the Herdr panel reads |
 | you | `clean <id>` | stop its agent and any terminal sitting in its worktree (when it has no uncommitted changes; busy folders are retried for a few seconds), then as the board's Clean settings say: remove its worktree, delete its branch, move the card to `archived` (all on by default; set with `config cleanWorktree`, `cleanBranch`, `cleanArchive` `on`/`off`) |
-| agent | `where` / `ask` / `done [--state s]` | update its own card; never edits the file directly. `--state` (`reached` default, `partial`, `blocked`, `failed`, `abandoned`) decides the tag shown on a Done card: the Finish-with state reached (Local commit, Local + review, Draft PR, PR ready, Merged), "Blocked", or "Not reached" |
+| agent | `where` / `ask` / `done [--state s]` | update its own card; never edits the file directly. `--state` (`reached` default, `partial`, `blocked`, `failed`, `abandoned`) decides the tag shown on a Done card: the Finish-with state reached (Report only, Local commit, Local + review, Draft PR, PR ready, Merged), "Blocked", or "Not reached" |
 
 `ls` also checks each running agent: a terminal that is gone, blocked on a prompt, or stopped without `ask`/`done`
 shows under **needs-you** with the reason.
