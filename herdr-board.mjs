@@ -1104,20 +1104,26 @@ function cmdClean(board, args) {
 
 // ---------- main ----------
 
-const argv = process.argv.slice(2);
-const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD || join(HERE, '..', 'board'));
-const [cmd, ...rest] = argv;
-const commands = {
-  new: cmdNew, draft: cmdDraft, ls: cmdLs, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
-  answer: cmdAnswer, press: cmdPress, clean: cmdClean, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
-};
-if (!cmd || !commands[cmd]) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
-  process.exit(cmd ? 1 : 0);
+// The tests import this file for its functions; HERDR_BOARD_NO_MAIN=1 keeps the command line below from running.
+export { parseCard, renderCard, section, setSection, applyFields, nextActionOf, display, whereOf, questionsOf, answersOf, termName, autoInterval, clip, STATUSES, OUTCOMES };
+
+function main() {
+  const argv = process.argv.slice(2);
+  const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD || join(HERE, '..', 'board'));
+  const [cmd, ...rest] = argv;
+  const commands = {
+    new: cmdNew, draft: cmdDraft, ls: cmdLs, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
+    answer: cmdAnswer, press: cmdPress, clean: cmdClean, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+  };
+  if (!cmd || !commands[cmd]) {
+    console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
+    process.exit(cmd ? 1 : 0);
+  }
+  try {
+    commands[cmd](loadBoard(boardDir), rest);
+  } catch (e) {
+    console.error(`herdr-board: ${e instanceof BoardError ? e.message : e.stack}`);
+    process.exit(1);
+  }
 }
-try {
-  commands[cmd](loadBoard(boardDir), rest);
-} catch (e) {
-  console.error(`herdr-board: ${e instanceof BoardError ? e.message : e.stack}`);
-  process.exit(1);
-}
+if (process.env.HERDR_BOARD_NO_MAIN !== '1') main();
