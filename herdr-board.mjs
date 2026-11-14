@@ -231,7 +231,7 @@ function clip(text) {
 }
 // ls runs often: the answer is kept per card in <board>/.last-message and reused while the transcript is unchanged.
 function lastMessageFromTranscript(worktree, cacheFile) {
-  const dir = join(homedir(), '.claude', 'projects', String(worktree).replace(/[^A-Za-z0-9]/g, '-'));
+  const dir = claudeProjectDir(worktree);
   let newest = null;
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.jsonl') || f.startsWith('agent-')) continue;
@@ -316,7 +316,7 @@ function screenOptions(screen) {
 // The transcript is ~/.claude/projects/<cwd, every non-alphanumeric char as ->/*.jsonl on the machine running the agent.
 function pendingAsk(cwd) {
   try {
-    const dir = join(homedir(), '.claude', 'projects', String(cwd).replace(/[^A-Za-z0-9]/g, '-'));
+    const dir = claudeProjectDir(cwd);
     const files = readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => ({ f, t: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
     if (!files.length) return null;
     const file = join(dir, files[0].f);
@@ -804,8 +804,6 @@ function startCard(board, card) {
   const repo = board.repos[card.meta.repo];
   if (!repo) die(`${card.id}: unknown repo "${card.meta.repo}"`);
   chooseAuto(board, card);
-  const model = card.meta.model;
-  const effort = card.meta.effort;
   const name = termName(card.id);
   if (liveTerminals(board)[name]) die(`${card.id}: its agent (${name}) is already running`);
   hc(board, ['rm', name], { json: false, allowFail: true });   // a finished one with the same name
@@ -840,8 +838,6 @@ function startCard(board, card) {
 
   card.meta.status = 'running';
   card.meta.active_ms = String(Date.now());
-  card.meta.model = model;
-  card.meta.effort = effort;
   card.meta.started = now();
   delete card.meta.start_error;
   card.meta.branch = branch;
@@ -1152,6 +1148,9 @@ function cmdResume(board, [id]) {
   if (existsSync(wt)) {
     let dirty = '';
     try { dirty = git(['-C', wt, 'status', '--porcelain']); } catch (e) { die(`${card.id}: ${wt} exists but is not a usable git worktree (${gitWhy(e)}); left alone`); }
+    let head = '';
+    try { head = git(['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']); } catch { /* reported above */ }
+    if (head !== branch) die(`${card.id}: ${wt} already exists but is on "${head}", not ${branch}; not resuming into it`);
     if (dirty) die(`${card.id}: ${wt} already exists with uncommitted changes (${dirty.split('\n').slice(0, 5).join('; ')}); not resuming into it. Commit or discard them, then resume again`);
   } else {
     try { git(['-C', repo.path, 'worktree', 'prune']); } catch { /* the add reports any real problem */ }
@@ -1159,15 +1158,17 @@ function cmdResume(board, [id]) {
     try { git(['-C', repo.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]); } catch { local = false; }
     if (local) git(['-C', repo.path, 'worktree', 'add', wt, branch]);
     else {
-      let remote = true;
-      try { git(['-C', repo.path, 'fetch', '--quiet', 'origin', branch]); git(['-C', repo.path, 'rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`]); } catch { remote = false; }
+      let remote = true, fetchWhy = '';
+      try { git(['-C', repo.path, 'fetch', '--quiet', 'origin', branch], { env: { ...process.env, LC_ALL: 'C' } }); } catch (e) { remote = false; fetchWhy = gitWhy(e); }
+      // a fetch that failed for another reason (offline, auth) does not prove the branch is gone: say so, leave the card alone
+      if (!remote && !/couldn't find remote ref|does not appear to be a git repository|No such remote/i.test(fetchWhy)) die(`${card.id}: could not fetch ${branch} from origin: ${fetchWhy}`);
+      if (remote) try { git(['-C', repo.path, 'rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`]); } catch { remote = false; }
       if (!remote) {
         const w = whereOf(card);
         setSection(card, 'Where we are', `- Goal: ${w.goal}
 - Done: ${w.done}
 - Next: cannot resume: branch ${branch} is gone locally and on origin`);
-        card.meta.updated = now();
-        saveCard(card);
+        saveCard(card);   // `updated` is the archive date (sorts the Archived column): not touched by a failed resume
         die(`${card.id}: branch ${branch} is gone locally and on origin: not recreating the worktree from nothing`);
       }
       git(['-C', repo.path, 'worktree', 'add', '-b', branch, wt, `origin/${branch}`]);
