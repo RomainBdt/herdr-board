@@ -65,6 +65,7 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
   Once the merge has succeeded (`gh pr view --json state` says `MERGED`), delete your own remote branch:
   `git push origin --delete card/{{id}}`. Do it only after a successful merge, never for another branch, and
   never for the other targets (those keep their branch). If the merge failed or did not happen, leave the branch alone.
+  If the remote branch is already gone (the repo deletes merged branches itself), that is fine: do not treat it as an error.
 - anything else: it is written in plain words: do exactly that.
 
 Then run `done` (with `--state` if the target was not fully reached) and a summary: what changed, decisions you made alone, anything the person should check, and the
