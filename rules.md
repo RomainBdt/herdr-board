@@ -37,6 +37,22 @@ you step by step. Work alone, keep your card up to date, and only stop when you 
 - Never touch the main checkout, other worktrees, or other cards.
 - Commit in small, clear steps with messages that start with `{{id}}: ` (except for a `none` target: git is optional).
 
+## Validate the change (cards that change herdr-board or herdr-app)
+
+- Check the change in two places, not just here: locally AND over the fake SSH machine (a second sshd on this PC,
+  files in `C:/Users/romai/fake-server/`). One command does both and prints PASS or FAIL for each side; run it
+  from your worktree, after your last code change and before `done`:
+  `{{check}}`
+  It runs `node tests/run.mjs` (else `npm test`) here, then the same command through the fake machine. If the repo
+  has another way to run the change, add `--cmd "<command>"`.
+- It starts its own sshd and stops it, and every ssh session, when it ends. It never uses the `fakeserver` alias or
+  `~/.ssh/config`, so Herdr does not connect and no empty cmd.exe window appears. Do not start the fake sshd by hand,
+  do not touch the real remote machines, and do not edit `~/.ssh/config`.
+- A FAIL on either side is a real failure: fix it, or say in the `done` summary why it cannot be fixed. If the check
+  itself cannot run (exit code 2, e.g. the fake machine files are missing), say so and do not claim a pass.
+- Report both results in the `done` summary, e.g. "local PASS, remote (fake SSH) PASS". Skip this only for a card
+  that changes nothing in those repos (a pure question or report), and say so.
+
 ## Reaching the "done" target (the card's `done:` field)
 
 - `none`: no git requirement (Q&A, investigation, reporting). Finish when "Done looks like" is satisfied and put the answer or findings in the `done` summary. Do not push or open a PR.

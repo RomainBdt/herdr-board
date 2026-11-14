@@ -870,7 +870,7 @@ function acceptTrustPrompt(board, name) {
 function renderRules(board, card) {
   const me = `node "${slash(join(HERE, 'herdr-board.mjs'))}" --board "${slash(board.dir)}"`;
   const text = readFileSync(join(HERE, 'rules.md'), 'utf8')
-    .replaceAll('{{board}}', me).replaceAll('{{id}}', card.id);
+    .replaceAll('{{board}}', me).replaceAll('{{check}}', `node "${slash(join(HERE, 'check.mjs'))}"`).replaceAll('{{id}}', card.id);
   const dir = join(board.dir, '.rules');
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${card.id}.md`);
