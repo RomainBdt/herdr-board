@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync, readdirSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { tempBoard, cardText, ROOT } from './helpers.mjs';
+import { tempBoard, cardText, ROOT, isolatedEnv } from './helpers.mjs';
 
 process.env.HERDR_BOARD_NO_MAIN = '1';
 const { parseCard, section } = await import('../herdr-board.mjs');
@@ -193,7 +193,14 @@ describe('ship-mark (the "shipping" label)', () => {
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout + r.stderr, '');
   };
-  const shipping = (id = 'TST-1') => JSON.parse(b.run('ls', '--json').out).cards.find(c => c.id === id).shipping;
+  // a fake hc whose `ls` shows a working terminal for each card, so a running card stays in the Running column
+  const shipping = (id = 'TST-1') => {
+    const fake = join(b.dir, 'hc-ship.mjs');
+    writeFileSync(fake, `console.log(process.argv[2] === 'ls' ? JSON.stringify({ terminals: [{ name: 'tst-1', status: 'working' }] }) : '{}');`);
+    const r = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', b.dir, 'ls', '--json'],
+      { env: { ...isolatedEnv(), HERDR_BOARD_HC_SCRIPT: fake }, encoding: 'utf8' });
+    return JSON.parse(r.stdout).cards.find(c => c.id === id).shipping;
+  };
   const ship = { hook_event_name: 'PreToolUse', tool_name: 'Skill', tool_input: { skill: 'ship' } };
   const running = (id = 'TST-1') => b.write(id, cardText({ id, title: 'S', repo: 'app', status: 'running', active_ms: Date.now() }));
 

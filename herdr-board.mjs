@@ -547,7 +547,7 @@ function cmdLs(board, args) {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
       done: c.meta.done || '', outcome: ['done', 'archived'].includes(c.meta.status) ? (c.meta.outcome || 'reached') : '', session: c.meta.session || '', model: c.meta.model || '', effort: c.meta.effort || '', autoChoice: c.meta.auto_choice || '',
-      approved: c.meta.approved === 'true', shipping: isShipping(board, c),
+      approved: c.meta.approved === 'true', shipping: d.column === 'running' && isShipping(board, c),
       where: whereOf(c), questions: questionsOf(c),
       prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
       terminal: live[termName(c.id)] ? termName(c.id) : '',
@@ -895,6 +895,7 @@ function startCard(board, card) {
   }
 
   allowShipCommands(board, wt, card);
+  clearShipping(board, card.id);   // a flag left by an agent that was killed must not show on the fresh one
 
   const brief = `You are the agent for card ${card.id} ("${card.meta.title}"). Read your card first: ${slash(card.path)}. Then work it to its "done" target, following your card rules.`;
   const session = randomUUID();   // fixed here so Resume knows which transcript is this card's
@@ -953,7 +954,7 @@ function allowShipCommands(board, wt, card) {
 const SHIP_HOOKS = [['PreToolUse', 'Skill'], ['UserPromptSubmit', undefined], ['Stop', undefined], ['SessionEnd', undefined]];
 function setShipHooks(cfg, board, card) {
   const command = `node "${slash(join(HERE, 'herdr-board.mjs'))}" --board "${slash(board.dir)}" ship-mark ${card.id}`;
-  const ours = (g) => (g.hooks || []).some(h => String(h.command || '').includes(' ship-mark '));
+  const ours = (g) => Array.isArray(g?.hooks) && g.hooks.some(h => String(h?.command || '').includes(' ship-mark '));
   cfg.hooks = cfg.hooks && typeof cfg.hooks === 'object' ? cfg.hooks : {};
   for (const [event, matcher] of SHIP_HOOKS) {
     const kept = (Array.isArray(cfg.hooks[event]) ? cfg.hooks[event] : []).filter(g => !ours(g));
@@ -1392,6 +1393,7 @@ function cmdResume(board, [id]) {
   }
 
   allowShipCommands(board, wt, card);
+  clearShipping(board, card.id);
   hc(board, ['rm', termName(card.id)], { json: false, allowFail: true });
   launchAgent(board, card, wt, ['--resume', session], []);
   const w = whereOf(card);
@@ -1430,6 +1432,7 @@ function main() {
   try {
     commands[cmd](loadBoard(boardDir), rest);
   } catch (e) {
+    if (cmd === 'ship-mark') return;   // a hook never fails, even when the board folder is gone
     console.error(`herdr-board: ${e instanceof BoardError ? e.message : e.stack}`);
     process.exit(1);
   }

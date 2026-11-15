@@ -490,7 +490,7 @@ export default class HerdrBoard extends View {
           .when(Boolean(tag), (el) => el.child(div().min_w(0).max_w(150).truncate().px(5).rounded(4).bg(t.raised)
             .text_size(10.5).font_medium().text_color(tag[1]).child(tag[0])))
           .when(Boolean(c.shipping), (el) => el.child(div().flex_shrink_0().px(5).rounded(4).bg(t.raised)
-              .text_size(10.5).font_medium().text_color(TAG_COLOR.shipping).child("🚀 Shipping")))
+            .text_size(10.5).font_medium().text_color(TAG_COLOR.shipping).child("🚀 Shipping")))
           .when(live, (el) => el.child(div().flex_shrink_0().text_size(11).text_color(t.working)
             .frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90))))
         .when(!compact, (el) => el.child(div().text_size(11).text_color(t.dim).truncate().child(`${c.repo} · ${model} · ${c.done}`)))
