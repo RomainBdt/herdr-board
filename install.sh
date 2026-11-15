@@ -11,7 +11,8 @@ cp layout/board.json "$home/layouts/board.json"
 # its own project. Point GIT_GRAPH_DIR at a clone of it (default: a "herdr-git-graph" folder next to this one).
 graph="${GIT_GRAPH_DIR:-$(cd .. && pwd)/herdr-git-graph}"
 if [ -d "$graph/mods/git-graph" ]; then
-  rm -rf "$home/mods/git-graph"; cp -R "$graph/mods/git-graph" "$home/mods/"
+  rm -rf "$home/mods/git-graph.new"; cp -R "$graph/mods/git-graph" "$home/mods/git-graph.new"
+  rm -rf "$home/mods/git-graph"; mv "$home/mods/git-graph.new" "$home/mods/git-graph"
   echo "installed the git-graph mod from $graph"
 else
   echo "WARNING: no git-graph mod at $graph/mods/git-graph: the Git button will open an empty panel."
