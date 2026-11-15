@@ -7,6 +7,7 @@
 //           add-repo <name> <path> [--prefix P] [--base B] [--color #hex] | remove-repo <name> | suggest-repos <folder>...
 //           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | resume <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] [--pr <url>] "<summary>"
+//   hook:   ship-mark <id>   (run by the card's Claude Code hooks, event JSON on stdin: shows or hides the "shipping" label)
 //
 // The board folder comes from --board <dir>, else HERDR_BOARD, else the folder of this script's parent "board".
 
@@ -546,7 +547,7 @@ function cmdLs(board, args) {
       id: c.id, title: c.meta.title || '', repo: c.meta.repo || '', color: repo.color || '#888888',
       status: c.meta.status || 'todo', column: d.column, note: d.note, lastMessage: d.last || '',
       done: c.meta.done || '', outcome: ['done', 'archived'].includes(c.meta.status) ? (c.meta.outcome || 'reached') : '', session: c.meta.session || '', model: c.meta.model || '', effort: c.meta.effort || '', autoChoice: c.meta.auto_choice || '',
-      approved: c.meta.approved === 'true',
+      approved: c.meta.approved === 'true', shipping: d.column === 'running' && isShipping(board, c),
       where: whereOf(c), questions: questionsOf(c),
       prompt: d.note.startsWith('waiting on a prompt') && args.includes('--json') ? promptOf(board, c) : null,
       terminal: live[termName(c.id)] ? termName(c.id) : '',
@@ -592,6 +593,44 @@ function cmdWhere(board, [id, goal, done, next]) {
   console.log(`${card.id}: updated "Where we are"`);
 }
 
+// ---------- the "shipping" label ----------
+// While the agent runs /ship, the card shows a "shipping" label. /ship itself is not changed: the card's worktree gets Claude Code
+// hooks (see allowShipCommands) that run `ship-mark` when the Skill tool starts /ship (or the person types /ship) and when the
+// agent stops (Stop, SessionEnd). The flag is a small file in the board folder, never the card, so it cannot race with the agent's
+// own card updates. `done`, `ask` and `clean` clear it too, and `ls` ignores one that is old or whose card is no longer running.
+const SHIPPING_MAX_MS = 3 * 3600 * 1000;
+function shippingFile(board, id) { return join(board.dir, '.shipping', `${id}.txt`); }
+function setShipping(board, id) {
+  mkdirSync(join(board.dir, '.shipping'), { recursive: true });
+  writeFileSync(shippingFile(board, id), String(Date.now()));
+}
+function clearShipping(board, id) { try { unlinkSync(shippingFile(board, id)); } catch { /* not shipping */ } }
+function isShipping(board, card) {
+  if (card.meta.status !== 'running') return false;
+  try { return Date.now() - Number(readFileSync(shippingFile(board, card.id), 'utf8')) < SHIPPING_MAX_MS; } catch { return false; }
+}
+
+// What a hook event means for the label: 'start' (/ship begins), 'stop' (the agent stopped or the session ended), else null.
+function shipEventOf(ev) {
+  const name = ev?.hook_event_name;
+  if (name === 'PreToolUse') return ev.tool_name === 'Skill' && /^([\w-]+:)?ship$/.test(String(ev.tool_input?.skill || '').trim()) ? 'start' : null;
+  if (name === 'UserPromptSubmit') return /^\s*\/([\w-]+:)?ship(\s|$)/.test(String(ev.prompt || '')) ? 'start' : null;
+  if (name === 'Stop' || name === 'SessionEnd') return 'stop';
+  return null;
+}
+
+// Never fails and prints nothing: a hook must not get in the agent's way.
+function cmdShipMark(board, [id]) {
+  try {
+    let ev = {};
+    try { ev = JSON.parse(readFileSync(0, 'utf8')); } catch { /* no event: nothing to do */ }
+    id = String(id || '').toUpperCase();
+    const what = shipEventOf(ev);
+    if (!id || !what || !existsSync(cardPath(board, id))) return;
+    if (what === 'start') setShipping(board, id); else clearShipping(board, id);
+  } catch { /* swallow */ }
+}
+
 function cmdAsk(board, [id, ...qs]) {
   if (!id || !qs.length) die('usage: ask <id> "<question 1>" ["<question 2>" ...]');
   const card = loadLive(board, id);
@@ -605,6 +644,7 @@ function cmdAsk(board, [id, ...qs]) {
   setSection(card, 'Questions', `_Asked ${now()}_\n\n` + qs.map((q, i) => `${i + 1}. ${q}`).join('\n'));
   setSection(card, 'Answers', ANSWERS_HINT(card.id));
   delete card.meta.reopened_outcome;   // the card is a live question again: it must not slide back to Done by itself
+  clearShipping(board, card.id);
   card.meta.status = 'needs-you';
   card.meta.updated = now();
   saveCard(card);
@@ -654,6 +694,7 @@ function cmdDone(board, args) {
   setSection(card, 'Result', `_${now()}_\n\n${summary.join(' ')}${pr ? `\n\nPull request: ${pr}` : ''}`);
   delete card.meta.reopened_outcome;   // an explicit `done` replaces the outcome remembered by a reopen
   delete card.meta.busy_ms;
+  clearShipping(board, card.id);
   const w = whereOf(card);
   setSection(card, 'Where we are', `- Goal: ${w.goal}\n- Done: ${w.done}\n- Next: nothing, card done (see Result)`);
   card.meta.status = 'done';
@@ -853,7 +894,8 @@ function startCard(board, card) {
     }
   }
 
-  allowShipCommands(wt, card);
+  allowShipCommands(board, wt, card);
+  clearShipping(board, card.id);   // a flag left by an agent that was killed must not show on the fresh one
 
   const brief = `You are the agent for card ${card.id} ("${card.meta.title}"). Read your card first: ${slash(card.path)}. Then work it to its "done" target, following your card rules.`;
   const session = randomUUID();   // fixed here so Resume knows which transcript is this card's
@@ -871,12 +913,12 @@ function startCard(board, card) {
 
 // Claude Code can't scope a permission to a folder, so each card worktree gets its own untracked
 // .claude/settings.local.json allowing what /ship needs and denying gh pr merge unless the card merges
-// (merged into any existing file).
+// (merged into any existing file). It also holds the hooks that drive the "shipping" label (see cmdShipMark).
 const SHIP_ALLOW = ['Bash(gh pr create:*)', 'Bash(gh pr edit:*)', 'Bash(gh pr checks:*)',
   'Bash(gh issue create:*)', 'Bash(gh issue list:*)', 'Bash(gh label create:*)', 'Bash(git push:*)'];
 // gh pr merge is allowed only when the card's done target is "merged"; otherwise it is denied.
 const MERGE_RULE = 'Bash(gh pr merge:*)';
-function allowShipCommands(wt, card) {
+function allowShipCommands(board, wt, card) {
   const merges = (card.meta.done || '').split('#')[0].trim() === 'merged';
   const wanted = merges ? [MERGE_RULE, ...SHIP_ALLOW] : SHIP_ALLOW;
   try {
@@ -886,13 +928,14 @@ function allowShipCommands(wt, card) {
     cfg.permissions = cfg.permissions || {};
     let allow = Array.isArray(cfg.permissions.allow) ? cfg.permissions.allow : [];
     let deny = Array.isArray(cfg.permissions.deny) ? cfg.permissions.deny : [];
-    const before = JSON.stringify([cfg.permissions.allow, cfg.permissions.deny ?? []]);
+    const before = JSON.stringify(cfg);
     if (merges) deny = deny.filter(r => r !== MERGE_RULE);
     else { allow = allow.filter(r => r !== MERGE_RULE); if (!deny.includes(MERGE_RULE)) deny = [...deny, MERGE_RULE]; }
     const next = [...allow, ...wanted.filter(r => !allow.includes(r))];
-    if (JSON.stringify([next, deny]) !== before) {
-      cfg.permissions.allow = next;
-      if (deny.length) cfg.permissions.deny = deny; else delete cfg.permissions.deny;
+    cfg.permissions.allow = next;
+    if (deny.length) cfg.permissions.deny = deny; else delete cfg.permissions.deny;
+    setShipHooks(cfg, board, card);
+    if (JSON.stringify(cfg) !== before) {
       mkdirSync(dirname(file), { recursive: true });
       writeAtomic(file, JSON.stringify(cfg, null, 2) + '\n');
     }
@@ -904,6 +947,19 @@ function allowShipCommands(wt, card) {
       writeFileSync(ex, cur + (cur && !cur.endsWith('\n') ? '\n' : '') + '.claude/settings.local.json\n');
     }
   } catch (e) { console.error(`warning: could not write the card's permission rules: ${e.message}`); }
+}
+
+// The hooks that tell `ship-mark` when /ship starts (Skill tool, or typed by the person) and when the agent stops or the session ends.
+// Ours are recognised by their command and replaced each time; the person's own hooks are kept.
+const SHIP_HOOKS = [['PreToolUse', 'Skill'], ['UserPromptSubmit', undefined], ['Stop', undefined], ['SessionEnd', undefined]];
+function setShipHooks(cfg, board, card) {
+  const command = `node "${slash(join(HERE, 'herdr-board.mjs'))}" --board "${slash(board.dir)}" ship-mark ${card.id}`;
+  const ours = (g) => Array.isArray(g?.hooks) && g.hooks.some(h => String(h?.command || '').includes(' ship-mark '));
+  cfg.hooks = cfg.hooks && typeof cfg.hooks === 'object' ? cfg.hooks : {};
+  for (const [event, matcher] of SHIP_HOOKS) {
+    const kept = (Array.isArray(cfg.hooks[event]) ? cfg.hooks[event] : []).filter(g => !ours(g));
+    cfg.hooks[event] = [...kept, { ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] }];
+  }
 }
 
 // A new worktree opens on Claude's "trust this folder?" question: say yes for it.
@@ -1229,6 +1285,7 @@ function cmdClean(board, args) {
   const repo = board.repos[card.meta.repo];
   const branch = card.meta.branch || `card/${card.id}`;
   const did = ['agent stopped'];
+  clearShipping(board, card.id);
   hc(board, ['kill', name], { json: false, allowFail: true });
   hc(board, ['rm', name], { json: false, allowFail: true });
   if (opt.worktree && card.meta.worktree && existsSync(card.meta.worktree)) {
@@ -1335,7 +1392,8 @@ function cmdResume(board, [id]) {
     }
   }
 
-  allowShipCommands(wt, card);
+  allowShipCommands(board, wt, card);
+  clearShipping(board, card.id);
   hc(board, ['rm', termName(card.id)], { json: false, allowFail: true });
   launchAgent(board, card, wt, ['--resume', session], []);
   const w = whereOf(card);
@@ -1357,7 +1415,7 @@ function cmdResume(board, [id]) {
 
 // The tests import this file for its functions. Node 24.2+ tells whether this file was started directly
 // (import.meta.main); on older Node, HERDR_BOARD_NO_MAIN=1 keeps the command line below from running.
-export { parseCard, renderCard, section, applyFields, nextActionOf, display, whereOf, questionsOf, answersOf, termName, autoInterval, clip };
+export { parseCard, renderCard, section, applyFields, nextActionOf, display, whereOf, questionsOf, answersOf, termName, autoInterval, clip, shipEventOf, setShipHooks };
 
 function main() {
   const argv = process.argv.slice(2);
@@ -1365,7 +1423,7 @@ function main() {
   const [cmd, ...rest] = argv;
   const commands = {
     new: cmdNew, draft: cmdDraft, ls: cmdLs, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
-    answer: cmdAnswer, press: cmdPress, clean: cmdClean, resume: cmdResume, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, 'add-repo': cmdAddRepo, 'remove-repo': cmdRemoveRepo, 'suggest-repos': cmdSuggestRepos, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+    answer: cmdAnswer, press: cmdPress, clean: cmdClean, resume: cmdResume, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, 'add-repo': cmdAddRepo, 'remove-repo': cmdRemoveRepo, 'suggest-repos': cmdSuggestRepos, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone, 'ship-mark': cmdShipMark,
   };
   if (!cmd || !commands[cmd]) {
     console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
@@ -1374,6 +1432,7 @@ function main() {
   try {
     commands[cmd](loadBoard(boardDir), rest);
   } catch (e) {
+    if (cmd === 'ship-mark') return;   // a hook never fails, even when the board folder is gone
     console.error(`herdr-board: ${e instanceof BoardError ? e.message : e.stack}`);
     process.exit(1);
   }

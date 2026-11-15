@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync, readdirSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { tempBoard, cardText, ROOT } from './helpers.mjs';
+import { tempBoard, cardText, ROOT, isolatedEnv } from './helpers.mjs';
 
 process.env.HERDR_BOARD_NO_MAIN = '1';
 const { parseCard, section } = await import('../herdr-board.mjs');
@@ -186,6 +186,83 @@ describe('where and ask (the agent\'s other commands)', () => {
   });
 });
 
+describe('ship-mark (the "shipping" label)', () => {
+  const mark = (ev, id = 'TST-1') => {
+    const r = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', b.dir, 'ship-mark', id],
+      { input: typeof ev === 'string' ? ev : JSON.stringify(ev), encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout + r.stderr, '');
+  };
+  // a fake hc whose `ls` shows a working terminal for each card, so a running card stays in the Running column
+  const shipping = (id = 'TST-1') => {
+    const fake = join(b.dir, 'hc-ship.mjs');
+    writeFileSync(fake, `console.log(process.argv[2] === 'ls' ? JSON.stringify({ terminals: [{ name: 'tst-1', status: 'working' }] }) : '{}');`);
+    const r = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', b.dir, 'ls', '--json'],
+      { env: { ...isolatedEnv(), HERDR_BOARD_HC_SCRIPT: fake }, encoding: 'utf8' });
+    return JSON.parse(r.stdout).cards.find(c => c.id === id).shipping;
+  };
+  const ship = { hook_event_name: 'PreToolUse', tool_name: 'Skill', tool_input: { skill: 'ship' } };
+  const running = (id = 'TST-1') => b.write(id, cardText({ id, title: 'S', repo: 'app', status: 'running', active_ms: Date.now() }));
+
+  test('the Skill tool starting /ship shows the label; the agent stopping hides it', () => {
+    running();
+    assert.equal(shipping(), false);
+    mark(ship);
+    assert.equal(shipping(), true);
+    mark({ hook_event_name: 'Stop' });
+    assert.equal(shipping(), false);
+  });
+
+  test('typing /ship starts it; the session ending (a failure, a kill) removes it', () => {
+    running();
+    mark({ hook_event_name: 'UserPromptSubmit', prompt: '/ship' });
+    assert.equal(shipping(), true);
+    mark({ hook_event_name: 'SessionEnd' });
+    assert.equal(shipping(), false);
+  });
+
+  test('other skills, other prompts and other tools do not start it', () => {
+    running();
+    mark({ ...ship, tool_input: { skill: 'code-review' } });
+    mark({ ...ship, tool_input: { skill: 'shipping-notes' } });
+    mark({ ...ship, tool_name: 'Bash' });
+    mark({ hook_event_name: 'UserPromptSubmit', prompt: 'please ship it' });
+    mark({ hook_event_name: 'UserPromptSubmit', prompt: '/shipit' });
+    assert.equal(shipping(), false);
+  });
+
+  test('done and ask remove it; so does a card that is no longer running', () => {
+    running();
+    mark(ship);
+    assert.equal(b.run('ask', 'TST-1', 'Q?').code, 0);
+    assert.equal(shipping(), false);
+    running();
+    assert.equal(shipping(), false);   // ask cleared the flag: it does not come back
+    mark(ship);
+    assert.equal(b.run('done', 'TST-1', 'ok').code, 0);
+    assert.equal(shipping(), false);
+    running();
+    assert.equal(shipping(), false);
+  });
+
+  test('a flag left behind by a crash expires, and a card that stopped running does not show it', () => {
+    running();
+    mark(ship);
+    b.write('TST-1', cardText({ id: 'TST-1', title: 'S', repo: 'app', status: 'needs-you' }));
+    assert.equal(shipping(), false);
+    running();
+    writeFileSync(join(b.dir, '.shipping', 'TST-1.txt'), String(Date.now() - 4 * 3600 * 1000));
+    assert.equal(shipping(), false);
+  });
+
+  test('never fails: bad input, an unknown card, no id', () => {
+    mark('not json');
+    mark(ship, 'NOPE-9');
+    mark(ship, '');
+    assert.equal(existsSync(join(b.dir, '.shipping', 'NOPE-9.txt')), false);
+  });
+});
+
 describe('ls: archived order', () => {
   test('archived cards: newest close date first, undated last; other columns untouched', () => {
     const mk = (id, extra) => b.write(id, cardText({ id, title: id, repo: 'app', status: 'archived', ...extra }));
@@ -306,6 +383,18 @@ console.log(c === 'ls' ? '{"terminals":[]}' : c === 'read' ? '❯ auto mode' : '
     assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     const run = s.calls().find(c => c[0] === 'run').join(' ');
     assert.match(run, new RegExp(`claude --session-id ${id} `));
+  });
+
+  test('start writes the /ship hooks into the worktree settings', () => {
+    const s = setup({ status: 'ready', approved: 'true' });
+    assert.equal(s.run('start', 'TST-1').code, 0);
+    const cfg = JSON.parse(readFileSync(join(s.wt, '.claude', 'settings.local.json'), 'utf8'));
+    for (const ev of ['PreToolUse', 'UserPromptSubmit', 'Stop', 'SessionEnd']) {
+      assert.equal(cfg.hooks[ev].length, 1, ev);
+      assert.match(cfg.hooks[ev][0].hooks[0].command, / ship-mark TST-1$/);
+    }
+    assert.equal(cfg.hooks.PreToolUse[0].matcher, 'Skill');
+    assert.ok(cfg.permissions.allow.includes('Bash(gh pr create:*)'));
   });
 
   test('ls shows the saved session, and the Resume button is only added for archived cards', () => {
