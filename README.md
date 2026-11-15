@@ -192,6 +192,9 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | you | `answer <id> ["text"]` | send your answers to the live session |
 | you | `press <id> <key>...` | answer the prompt a blocked agent is showing (a permission prompt or a single-question AskUserQuestion) by pressing that option's number, then watch its screen for 8 s. Never sends the same answer twice: after a send that did not seem to land, it only looks again. The panel's option buttons and Retry run this |
 | you | `config <key> <value>` | board settings in `board.json`: `maxParallel` any whole number from 1, `autoStart` on/off, `autoInterval` minutes, `cleanWorktree` / `cleanBranch` / `cleanArchive` on/off |
+| you | `add-repo <name> <path> [--prefix P] [--base B] [--color #hex]` | put a git repo in `board.json`. Prefix (the initials of the name: `herdr-git-graph` gives `HGG`), base branch (origin's default, else `main`, `master`, the checked-out one) and color (the first unused one) are chosen for you; the flags override them. A worktree path adds the repo it belongs to. Never runs by itself |
+| you | `remove-repo <name>` | take a repo out of `board.json`. Its folder, worktrees and cards are not touched. Refused while a card that is not archived still uses it (the message lists them) |
+| you | `suggest-repos <folder>...` | of these folders, the git repos not on the board yet, as JSON (what the panel's **+** form calls with the Herdr Spaces' folders). Adds nothing |
 | you | `ls [--json]` | the board; `--json` is what the Herdr panel reads |
 | you | `clean <id>` | stop its agent and any terminal sitting in its worktree (when it has no uncommitted changes; busy folders are retried for a few seconds), then as the board's Clean settings say: remove its worktree, delete its branch, move the card to `archived` (all on by default; set with `config cleanWorktree`, `cleanBranch`, `cleanArchive` `on`/`off`) |
 | agent | `where` / `ask` / `done [--state s] [--pr url]` | update its own card; never edits the file directly. `--state` (`reached` default, `partial`, `blocked`, `failed`, `abandoned`) decides the tag shown on a Done card: the Finish-with state reached (None, Local commit, Local + review, Draft PR, PR ready, Merged), "Blocked", or "Not reached" |
@@ -284,6 +287,10 @@ with `./deploy.sh` (or point the local board at this checkout).
 - **Answer** shows the questions with a box for your answers; **Send answers** delivers them to the live session.
 - The card editor saves on the server and refuses if an agent changed the card meanwhile.
 - **+**, **▶ Start next** in the header. Each card's tab is named after the card.
+- Repos: **+** lists the board's repos. Under them, **In your Herdr Spaces, not on the board yet** offers the git repos
+  that your Spaces' folders hold and the board lacks; click one, then **Add repo** to confirm (it is the `add-repo`
+  command). **Edit repos** turns the chips into remove buttons; click one, then **Remove repo** to confirm (`remove-repo`:
+  only the `board.json` entry goes, and a repo that cards still use is refused). A repo is never added or removed by itself.
 - Commands for `keys.json`: `herdr-board.answer` (first card with questions), `herdr-board.jump` (its session),
   `herdr-board.settings`, `herdr-board.refresh`, `herdr-board-tabs.toggle`.
 
