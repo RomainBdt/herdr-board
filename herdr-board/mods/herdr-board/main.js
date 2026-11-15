@@ -5,7 +5,7 @@
 // Settings live in Herdr's shared state ("herdr-board.settings"), so the tab bar's Board button sees them too.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, EditorState, Editor, TextareaState, Textarea } from "gpui-base";
-import { exec, run, props, theme, settings, notify, playSound, openOverlay, closeOverlay, readTextFile, shared, setShared, agents, nextCommand, layout, machines } from "herdr";
+import { exec, run, props, theme, settings, notify, playSound, openOverlay, closeOverlay, readTextFile, shared, setShared, agents, nextCommand, layout, machines, spaces, panes } from "herdr";
 
 const COLUMNS = [
   ["todo", "To do"], ["ready", "Ready"], ["running", "Running"], ["needs-you", "Needs you"], ["done", "Done"], ["archived", "Archived"],
@@ -967,6 +967,13 @@ export default class HerdrBoard extends View {
     const all = withRepos.flatMap((x) => Object.keys(x.repos));
     this.pick = all.length === 1 ? { b: props().boards.indexOf(withRepos[0]), repo: all[0] } : null;
     this.errs = {};           // mandatory fields found empty on Create: {repo, title}
+    // The repos as this form sees them: a copy, so adding or removing one here shows at once, before the board is read again.
+    this.bds = (props().boards ?? []).map((x) => ({ ...x, repos: { ...x.repos } }));
+    this.sugg = [];           // repos in Herdr Spaces that the board does not have yet: [{b, name, path, prefix, base, color}]
+    this.manage = false;      // "Edit repos": clicking a repo removes it (after a confirmation)
+    this.ask = null;          // the add / remove waiting for Confirm: {kind: "add" | "remove", b, name, ...}
+    this.repoBusy = false;
+    this.repoMsg = "";
     this.title = "";
     this.msg = "";
     this.done = "pr-ready";
@@ -993,8 +1000,64 @@ export default class HerdrBoard extends View {
     for (const st of this.fields) st.on("focus", () => { this.focused = st; });
     this.focused = this.input;
     if (this.existing) { this.loadForm(cx); return; }
+    this.loadSuggestions(cx);
     this.input.focus();
     cx.timer.after(400, () => { if (this.focused === this.input) this.input.focus(); });
+  }
+
+  // The git repos among the folders of Herdr's Spaces that a board does not have yet (the board's CLI works them out).
+  // Nothing is added by this: each one is offered as a chip, and added only when the person confirms.
+  loadSuggestions(cx) {
+    cx.spawn(async (cx) => {
+      const token = this.suggRun = (this.suggRun ?? 0) + 1;   // a later call replaces this one if it is still running
+      const per = await Promise.all(this.bds.map(async (bd, bi) => {
+        const mine = bd.conn.machine || null;
+        // Each Space's folder, and where its terminals are now: a Space's folder can be home or empty while its terminals sit in a repo
+        const here = spaces().filter((sp) => (sp.machine || null) === mine);
+        const tabs = new Set(here.flatMap((sp) => (sp.tabs ?? []).map((tb) => tb.id)));
+        const cwds = panes().filter((pn) => tabs.has(pn.tab) && pn.cwd).map((pn) => pn.cwd);
+        const folders = [...new Set([...here.map((sp) => sp.folder).filter(Boolean), ...cwds])];
+        if (!folders.length) return [];
+        const r = await cli(bd.conn, ["suggest-repos", ...folders]);
+        let list = [];
+        try { list = JSON.parse(r.out); } catch { /* an older CLI without suggest-repos: no suggestions */ }
+        return Array.isArray(list) ? list.map((x) => ({ ...x, b: bi })) : [];
+      }));
+      if (token !== this.suggRun) return;
+      this.sugg = per.flat().filter((x) => !this.bds[x.b].repos[x.name]);
+      cx.notify();
+    });
+  }
+
+  // Confirm in the form: add the suggested repo to its board, or remove one from it. Nothing else changes: the folder,
+  // its worktrees and its cards are never touched, and the CLI refuses to remove a repo that cards still use.
+  doRepo(cx) {
+    const a = this.ask;
+    if (!a || this.repoBusy) return;
+    const bd = this.bds[a.b];
+    this.repoBusy = true;
+    this.repoMsg = a.kind === "add" ? `Adding ${a.name}…` : `Removing ${a.name}…`;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const r = a.kind === "add"
+        ? await cli(bd.conn, ["add-repo", a.name, a.path, "--base", a.base, "--color", a.color, "--json"])   // the prefix is worked out again there: it cannot clash with a repo added meanwhile
+        : await cli(bd.conn, ["remove-repo", a.name]);
+      this.repoBusy = false;
+      const current = this.ask === a;   // false when the person moved on to another question meanwhile
+      if (!r.ok) { if (current) this.repoMsg = r.err; cx.notify(); return; }   // the question stays: the message says why
+      if (a.kind === "add") {
+        bd.repos[a.name] = a.color;
+        this.sugg = this.sugg.filter((x) => !(x.b === a.b && x.name === a.name));
+        if (current) { this.pick = { b: a.b, repo: a.name }; this.errs.repo = ""; }
+      } else {
+        delete bd.repos[a.name];
+        if (this.pick?.b === a.b && this.pick.repo === a.name) this.pick = null;
+        this.loadSuggestions(cx);   // its Space, if any, offers it again
+      }
+      if (current) { this.ask = null; this.repoMsg = ""; }
+      setShared(BUMP, Date.now());   // the board panel reads its repos again
+      cx.notify();
+    });
   }
 
   // An existing card: fill the form from the card file.
@@ -1128,14 +1191,40 @@ export default class HerdrBoard extends View {
   renderNew(cx) {
     const t = theme();
     const p = props();
-    const boards = p.boards ?? [];
+    const boards = this.bds ?? p.boards ?? [];
     const repoChips = (bd, bi) => h_flex().gap(6).flex_wrap().children(Object.entries(bd.repos).map(([name, color]) => {
-      const on = this.pick?.b === bi && this.pick.repo === name;
+      const on = !this.manage && this.pick?.b === bi && this.pick.repo === name;
       return h_flex().id(`repo-${bi}-${safeId(name)}`).h(26).px(10).gap(6).items_center().rounded(7).cursor_pointer()
         .border_1().border_color(on ? color : t.border).bg(on ? t.selected : t.raised)
-        .on_click((_e, cx) => { this.pick = { b: bi, repo: name }; this.errs.repo = ""; cx.notify(); })
-        .child(div().w(8).h(8).rounded_full().bg(color)).child(div().text_size(12).child(name));
+        .on_click((_e, cx) => {
+          if (this.manage) { this.ask = { kind: "remove", b: bi, name }; this.repoMsg = ""; }
+          else { this.pick = { b: bi, repo: name }; this.errs.repo = ""; }
+          cx.notify();
+        })
+        .child(div().w(8).h(8).rounded_full().bg(color)).child(div().text_size(12).child(name))
+        .when(this.manage, (el) => el.child(div().text_size(12).text_color(t.blocked).child("✕")));
     }));
+    // repos that Herdr Spaces have and the board does not: "+ name" chips, added only after Confirm
+    const suggChips = (bi) => h_flex().gap(6).flex_wrap().children(this.sugg.filter((x) => x.b === bi).map((x) =>
+      h_flex().id(`sugg-${bi}-${safeId(x.name)}`).h(26).px(10).gap(6).items_center().rounded(7).cursor_pointer()
+        .border_1().border_color(this.ask?.name === x.name && this.ask?.kind === "add" ? x.color : t.border).bg(t.raised)
+        .on_click((_e, cx) => { this.ask = { kind: "add", ...x }; this.repoMsg = ""; cx.notify(); })
+        .tooltip(`${x.path} (from a Herdr Space, not on the board yet)`)
+        .child(div().text_size(12).text_color(t.muted).child("+"))
+        .child(div().w(8).h(8).rounded_full().bg(x.color)).child(div().text_size(12).text_color(t.muted).child(x.name))));
+    const askBox = () => {
+      const a = this.ask;
+      const where = this.bds.length > 1 ? ` on ${this.bds[a.b].label}` : "";
+      const text = a.kind === "add"
+        ? `Add "${a.name}" to the board${where}? ${a.path}. Its cards will be named ${a.prefix}-1, ${a.prefix}-2… and start from ${a.base}.`
+        : `Remove "${a.name}" from the board${where}? Only its entry in board.json goes: its folder, worktrees and cards stay. It is refused while cards that are not archived still use it.`;
+      return v_flex().gap(6).p(10).rounded(8).border_1().border_color(a.kind === "remove" ? t.blocked : t.border).bg(t.raised)
+        .child(div().text_size(12).child(text))
+        .when(Boolean(this.repoMsg), (el) => el.child(div().text_size(11.5).text_color(this.repoBusy ? t.muted : t.blocked).child(this.repoMsg)))
+        .child(h_flex().gap(8)
+          .child(button("repo-ok", a.kind === "add" ? "Add repo" : "Remove repo", (cx) => this.doRepo(cx), { primary: a.kind === "add", tone: a.kind === "remove" ? t.blocked : null, dim: this.repoBusy }))
+          .child(button("repo-no", "Cancel", (cx) => { this.ask = null; this.repoMsg = ""; cx.notify(); })));
+    };
     const chip = (id, options, current, pick) => h_flex().gap(4).flex_wrap().children(options.map(([v, label, color]) =>
       h_flex().id(`${id}-${v}`).h(26).px(10).gap(6).items_center().rounded(7).cursor_pointer().text_size(12)
         .border_1().border_color(current === v ? (color ?? t.accent) : t.border).bg(current === v ? t.selected : t.raised)
@@ -1164,11 +1253,15 @@ export default class HerdrBoard extends View {
           .child("This card has started, so its fields can no longer be changed here. Use Edit as text to add to the card file.")))
         .when(this.existing && !this.loaded, (el) => el.child(div().pt(8).text_size(12).text_color(t.muted).child(this.msg || "Loading…")))
         .when(this.existing, (el) => el.child(label("Repo")).child(div().text_size(12).text_color(t.muted).child(this.form?.repo ?? "")))
-        .when(!this.existing, (el) => el.child(label("Repo")))
+        .when(!this.existing, (el) => el.child(h_flex().gap(8).items_center().pt(8)
+          .child(div().flex_1().text_size(11.5).font_semibold().text_color(t.muted).child("Repo"))
+          .child(button("repo-manage", this.manage ? "Done" : "Edit repos", (cx) => { this.manage = !this.manage; this.ask = null; this.repoMsg = ""; cx.notify(); }, { tone: t.muted, tip: "Remove a repo from the board (its folder and cards are kept)" }))))
         // with several boards, their repos are grouped under each board's name
-        .children(this.existing ? [] : boards.length > 1
-          ? boards.map((bd, bi) => v_flex().gap(4).child(div().text_size(11).font_semibold().text_color(t.muted).child(bd.label)).child(repoChips(bd, bi)))
-          : boards.map(repoChips))
+        .children(this.existing ? [] : boards.map((bd, bi) => v_flex().gap(4)
+          .when(boards.length > 1, (el) => el.child(div().text_size(11).font_semibold().text_color(t.muted).child(bd.label)))
+          .child(repoChips(bd, bi))
+          .when(this.sugg.some((x) => x.b === bi), (el) => el.child(div().pt(2).text_size(11).text_color(t.dim).child("In your Herdr Spaces, not on the board yet:")).child(suggChips(bi)))))
+        .when(!this.existing && Boolean(this.ask), (el) => el.child(askBox()))
         .when(!this.existing && !boards.length, (el) => el.child(div().text_size(12).text_color(t.blocked).child("No board could be read yet. Check ⚙ → Boards.")))
         .when(Boolean(this.errs.repo), (el) => el.child(err(this.errs.repo)))
         .child(label("Title"))
