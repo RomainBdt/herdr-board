@@ -7,6 +7,17 @@ mkdir -p "$home/mods/herdr-board" "$home/mods/herdr-board-tabs"
 cp herdr-board/mods/herdr-board/main.js herdr-board/mods/herdr-board/mod.json "$home/mods/herdr-board/"
 cp herdr-board/mods/herdr-board-tabs/* "$home/mods/herdr-board-tabs/"
 cp layout/board.json "$home/layouts/board.json"
+# The layout's Git panel and tab-bar button open the git-graph mod (github.com/rabeeh-ta/herdr-git-graph), which is
+# its own project. Point GIT_GRAPH_DIR at a clone of it (default: a "herdr-git-graph" folder next to this one).
+graph="${GIT_GRAPH_DIR:-$(cd .. && pwd)/herdr-git-graph}"
+if [ -d "$graph/mods/git-graph" ]; then
+  rm -rf "$home/mods/git-graph.new"; cp -R "$graph/mods/git-graph" "$home/mods/git-graph.new"
+  rm -rf "$home/mods/git-graph"; mv "$home/mods/git-graph.new" "$home/mods/git-graph"
+  echo "installed the git-graph mod from $graph"
+else
+  echo "WARNING: no git-graph mod at $graph/mods/git-graph: the Git button will open an empty panel."
+  echo "  Clone github.com/rabeeh-ta/herdr-git-graph and run again with GIT_GRAPH_DIR=<its folder>."
+fi
 skills="${CLAUDE_HOME:-$HOME/.claude}/skills"
 mkdir -p "$skills/card-creator"
 cp skills/card-creator/SKILL.md "$skills/card-creator/"

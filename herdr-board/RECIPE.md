@@ -51,6 +51,8 @@ tabs, `board-top`) with:
   alone draws nothing useful. Set **Board CLI** and **Board folder** in ⚙.
 - The layout needs nodes with ids `board-side` and `board-top` (the repo's `layout/board.json` has them) for the Board
   button and the Position setting. Without them the panel still works as a plain mod in any slot.
+- The tab bar copy also has a **Git** button. It only shows when the layout has a `graph` node holding the `git-graph`
+  mod (github.com/rabeeh-ta/herdr-git-graph, not part of this folder; the repo's `install.sh` copies it).
 - Herdr updates to its own tab bar don't reach `herdr-board-tabs`; redo the copy with `herdr-app do mod.clone` and re-add the button.
 - Reads files outside its own folder (the board folder and the CLI) and runs programs: read the files before adding it.
 
