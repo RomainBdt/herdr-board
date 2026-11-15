@@ -66,6 +66,13 @@ describe('mergeLayout', () => {
     assert.deepEqual(panelIds(layout), ['files', 'changes', 'one']);
   });
 
+  test('a block holding an id the repo layout already uses is dropped', () => {
+    const nested = { id: 'extras', type: 'stack', children: [extra('files')] };
+    const { layout, kept } = mergeLayout(repo(), installedWith(nested, extra('one')));
+    assert.deepEqual(kept, ['one']);
+    assert.deepEqual(panelIds(layout), ['files', 'changes', 'one']);
+  });
+
   test('an installed layout without a panel-body changes nothing', () => {
     assert.deepEqual(mergeLayout(repo(), { id: 'root', type: 'row', children: [] }), { layout: repo(), kept: [] });
     assert.deepEqual(mergeLayout(repo(), null), { layout: repo(), kept: [] });
@@ -100,13 +107,19 @@ describe('installLayout (the file install.sh writes)', () => {
     assert.deepEqual(readdirSync(dir), ['board.json']);   // no temp file left behind
   }));
 
-  test('an installed layout that is not JSON: replaced, with a warning', () => withDir(dir => {
+  test('an installed layout that is not JSON: replaced, with a warning, the old file set aside, a .bak untouched', () => withDir(dir => {
     const out = join(dir, 'board.json');
     writeFileSync(out, '{ not json');
+    writeFileSync(`${out}.bak`, 'my own backup');
     const { kept, warning } = installLayout(REPO_PATH, out);
     assert.deepEqual(kept, []);
     assert.match(warning, /not valid JSON/);
     assert.equal(readFileSync(out, 'utf8'), REPO_TEXT);
+    assert.equal(readFileSync(`${out}.bak`, 'utf8'), 'my own backup');
+    const aside = readdirSync(dir).filter(f => f.startsWith('board.json.invalid-'));
+    assert.equal(aside.length, 1);
+    assert.equal(readFileSync(join(dir, aside[0]), 'utf8'), '{ not json');
+    assert.match(warning, new RegExp(aside[0]));
   }));
 
   test('the command line prints the kept panels', () => withDir(dir => {
