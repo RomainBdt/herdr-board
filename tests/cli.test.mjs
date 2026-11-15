@@ -389,3 +389,74 @@ console.log(c === 'ls' ? '{"terminals":[]}' : c === 'read' ? '❯ auto mode' : '
     assert.equal(card('TST-1').meta.status, 'archived');
   });
 });
+
+describe('approve --start (Approve and start)', () => {
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' });
+  // a real repo, and a fake hc: `ls` answers with the given running terminals, everything else is logged
+  function setup(terminals = []) {
+    const repo = join(b.dir, 'repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+    const board = JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8'));
+    board.repos.app.path = repo;
+    writeFileSync(join(b.dir, 'board.json'), JSON.stringify(board));
+    const log = join(b.dir, 'hc.log');
+    const fake = join(b.dir, 'hc.mjs');
+    writeFileSync(fake, `import {appendFileSync} from 'node:fs';
+appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+const c = process.argv[2];
+console.log(c === 'ls' ? ${JSON.stringify(JSON.stringify({ terminals }))} : c === 'read' ? '❯ auto mode' : '{}');`);
+    const claude = join(b.dir, 'claude-config');
+    const run = (...args) => {
+      const env = { ...process.env, HERDR_BOARD_HC_SCRIPT: fake, CLAUDE_CONFIG_DIR: claude };
+      const r = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', b.dir, ...args], { env, encoding: 'utf8' });
+      return { code: r.status, out: r.stdout, err: r.stderr };
+    };
+    const calls = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l)) : []);
+    return { run, calls };
+  }
+  const make = (id, extra = {}) => b.write(id, cardText({ id, title: id, repo: 'app', status: 'todo', model: 'sonnet', effort: 'medium', ...extra }));
+
+  test('a free slot: the card is approved and running at once', () => {
+    const s = setup();
+    make('TST-1');
+    const r = s.run('approve', 'TST-1', '--start');
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /started as tst-1/);
+    const c = card('TST-1');
+    assert.equal(c.meta.status, 'running');
+    assert.equal(c.meta.approved, 'true');
+    assert.ok(c.meta.session);
+    assert.ok(s.calls().some(a => a[0] === 'run'));
+  });
+
+  test('all slots taken (maxParallel): the card waits in Ready and nothing is launched', () => {
+    const s = setup([{ name: 'tst-8', status: 'working' }, { name: 'tst-9', status: 'working' }]);
+    make('TST-8', { status: 'running' });
+    make('TST-9', { status: 'running' });
+    make('TST-1');
+    const r = s.run('approve', 'TST-1', '--start');
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /all slots are taken/);
+    assert.equal(card('TST-1').meta.status, 'ready');
+    assert.equal(card('TST-1').meta.approved, 'true');
+    assert.ok(!s.calls().some(a => a[0] === 'run'));
+  });
+
+  test('plain approve still only moves the card to Ready', () => {
+    const s = setup();
+    make('TST-1');
+    assert.equal(s.run('approve', 'TST-1').code, 0);
+    assert.equal(card('TST-1').meta.status, 'ready');
+    assert.ok(!s.calls().some(a => a[0] === 'run'));
+  });
+
+  test('the panel has both the Approve and the Approve and start buttons on To do cards', () => {
+    const ui = readFileSync(join(ROOT, 'herdr-board', 'mods', 'herdr-board', 'main.js'), 'utf8');
+    const lines = ui.split('\n').filter(l => /c\.column === "todo"\) b\.push/.test(l));
+    assert.equal(lines.length, 2);
+    assert.ok(lines.some(l => /"Approve", .*\["approve", id\]/.test(l)));
+    assert.ok(lines.some(l => /"Approve and start", .*\["approve", id, "--start"\]/.test(l)));
+  });
+});

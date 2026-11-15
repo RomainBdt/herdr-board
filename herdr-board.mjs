@@ -3,7 +3,7 @@
 // hc terminal in its own git worktree. Runs on the machine that holds the repos (the "server").
 // No packages: Node's standard library only.
 //
-//   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | approve <id> [--model m] [--effort e] | unapprove <id> | next | start <id>
+//   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | approve <id> [--model m] [--effort e] [--start] | unapprove <id> | next | start <id>
 //           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | resume <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] [--pr <url>] "<summary>"
 //
@@ -685,8 +685,10 @@ function chooseAuto(board, card) {
 function cmdApprove(board, args) {
   const model = takeFlag(args, '--model');
   const effort = takeFlag(args, '--effort');
+  const startNow = args.includes('--start');
+  if (startNow) args.splice(args.indexOf('--start'), 1);
   const [id] = args;
-  if (!id) die('usage: approve <id> [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]');
+  if (!id) die('usage: approve <id> [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max] [--start]');
   const card = loadCard(board, id);
   if (model) card.meta.model = model;
   if (effort) card.meta.effort = effort;
@@ -699,6 +701,18 @@ function cmdApprove(board, args) {
   if ((card.meta.status || 'todo') === 'todo') card.meta.status = 'ready';
   saveCard(card);
   console.log(`${card.id}: ready (${card.meta.model}/${card.meta.effort})`);
+  if (!startNow || card.meta.status !== 'ready') return;
+  // --start: run it now when a slot is free (maxParallel still applies); otherwise it waits in Ready like a plain approve
+  const running = busyCount(board);
+  if (running >= board.maxParallel) { console.log(`${card.id}: all slots are taken (${running}/${board.maxParallel} running): waiting in Ready`); return; }
+  try { startCard(board, card); }
+  catch (e) {
+    const fresh = loadCard(board, card.id);
+    fresh.meta.start_error = String(e.message).replace(/\s+/g, ' ').slice(0, 200);
+    saveCard(fresh);
+    die(`${card.id}: approved but could not start: ${fresh.meta.start_error}`);
+  }
+  console.log(`${card.id}: started as ${termName(card.id)}`);
 }
 
 // Undo an approve (or a mistaken Start click) while the card has not started: back to To do, no longer approved.

@@ -414,6 +414,8 @@ export default class HerdrBoard extends View {
     const id = c.id, u = c.uid, on = c.conn;
     if (c.column === "todo") b.push(button(`ap-${u}`, "Approve", (cx) => this.act(cx, `Approving ${id}…`, ["approve", id], undefined, on),
       { tip: "Uses the card's model and effort; for Auto, Haiku picks them now and says why on the card" }));
+    if (c.column === "todo") b.push(button(`aps-${u}`, "Approve and start", (cx) => this.act(cx, `Approving and starting ${id}…`, ["approve", id, "--start"], 90000, on),
+      { tip: "Approve it and start its agent now. If every slot is taken, it waits in Ready" }));
     if (c.column === "ready") b.push(button(`st-${u}`, "Start", (cx) => this.act(cx, `Starting ${id}…`, ["start", id], 90000, on)));
     if (c.column === "ready") b.push(button(`un-${u}`, "To do", (cx) => this.act(cx, `Moving ${id} back to To do…`, ["unapprove", id], undefined, on), { tone: t.muted, tip: "Not started yet: move it back to To do (not approved)" }));
     if (c.column === "needs-you" && c.questions.length && c.status === "needs-you")
