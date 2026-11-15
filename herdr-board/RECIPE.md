@@ -21,7 +21,9 @@ tabs, `board-top`) with:
 3. **Tags** on Done cards: the done target (None, Local commit, Local + review, Draft PR, PR ready, Merged) each in its
    own color (`#9ca3af`, `#e5b92e`, `#a6c93a`, `#5cc86a`, `#22b8a0`, `#15a34a`), plus Blocked `#f97316` and Not reached `#ef4444`.
 4. **Tab bar button:** the second mod, `herdr-board-tabs`, is a copy of Herdr's `tabs` mod with a **Board** button beside
-   Files and Changes. It shows or hides the board node and shows a red count while hidden.
+   the panel buttons. It shows or hides the board node and shows a red count while hidden. The panel buttons are one per
+   block in the layout's `panel-body` stack (label and icon from the block's `content.props.label` / `icon`, else its id),
+   so a panel added to the layout gets a button with no change to the mod.
 
 ## How it behaves
 
@@ -44,6 +46,7 @@ tabs, `board-top`) with:
 - `mods/herdr-board-tabs/` (the tab bar copy and four window-button svgs).
 - Programs it runs: `node` (the board CLI), `hc`, `git` and `ssh` through the CLI. Nothing else, no network calls of its own.
 - `keys.json`: `"ctrl-alt-b": "herdr-board-tabs.toggle"` (not Ctrl+B: Claude Code uses it; ctrl+alt is AltGr on Windows).
+  `"herdr-board-tabs.<panel-body block id>"` opens or closes that panel.
 
 ## Watch out
 
@@ -51,7 +54,9 @@ tabs, `board-top`) with:
   alone draws nothing useful. Set **Board CLI** and **Board folder** in ⚙.
 - The layout needs nodes with ids `board-side` and `board-top` (the repo's `layout/board.json` has them) for the Board
   button and the Position setting. Without them the panel still works as a plain mod in any slot.
-- Herdr updates to its own tab bar don't reach `herdr-board-tabs`; redo the copy with `herdr-app do mod.clone` and re-add the button.
+- Herdr updates to its own tab bar don't reach `herdr-board-tabs`; redo the copy with `herdr-app do mod.clone` and re-add the button
+  and the panel buttons built from `panel-body`.
+- Installing the layout must merge, not copy: the repo's `install.sh` keeps the blocks the person added to `panel-body`.
 - Reads files outside its own folder (the board folder and the CLI) and runs programs: read the files before adding it.
 
 ## Done when

@@ -1,16 +1,35 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
 import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, nextCommand } from "herdr";
-// Modified from the "tabs" mod shipped with Herdr (Apache License 2.0, see NOTICE): a Board button was added.
+// Modified from the "tabs" mod shipped with Herdr (Apache License 2.0, see NOTICE): a Board button was added,
+// and the panel buttons come from the layout.
 
-// herdr-board: a copy of Herdr's tab bar ("tabs") with a Board button beside Files and Changes.
+// herdr-board: a copy of Herdr's tab bar ("tabs") with a Board button beside the panel buttons.
 // The board sits in the layout node the board's Position setting picks; the button shows or hides it,
 // with a red count of the cards that need you while it is hidden. Ctrl+Alt+B: "herdr-board-tabs.toggle".
+//
+// Panel buttons: one per block in the layout's "panel-body" stack, in its order. The label and icon are the
+// block's content.props.label / content.props.icon (else its id, no icon). "herdr-board-tabs.<block id>"
+// shows that panel, or hides it when it is already shown (bind it in keys.json).
 const BOARD_SLOT = { side: "board-side", top: "board-top" };
 function boardId() { return BOARD_SLOT[(shared("herdr-board.settings") ?? {}).position ?? "side"] ?? "board-side"; }
 function toggleBoard() {
   const id = boardId(), node = find(layout(), id);
   if (node) run(node.hidden ? "layout.show" : "layout.hide", { id });
+}
+
+// Herdr's own panels setting ("workspace.panels", set by its welcome) says which of these two are on.
+// Every other panel-body block is always on.
+const HERDR_PANELS = ["files", "changes"];
+function panelBlocks(root) {
+  const on = shared("workspace.panels") ?? HERDR_PANELS;
+  return (find(root, "panel-body")?.children ?? []).filter(c => c?.id && (!HERDR_PANELS.includes(c.id) || on.includes(c.id)));
+}
+function togglePanel(id) {
+  const root = layout(), panel = find(root, "panel"), body = find(root, "panel-body");
+  if (!panel || !panelBlocks(root).some(c => c.id === id)) return;
+  if (!panel.hidden && body?.active === id) run("layout.hide", { id: "panel" });
+  else { run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" }); }
 }
 
 function find(node, id) {
@@ -24,7 +43,7 @@ function find(node, id) {
 
 export default class Tabs extends View {
   init(_props, cx) {
-    cx.spawn(async (cx) => { for (;;) { if (await nextCommand() === "toggle") toggleBoard(); cx.notify(); } });
+    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "toggle") toggleBoard(); else togglePanel(c); cx.notify(); } });
     this.pressed = null;
     this.scroll = ScrollHandle.new();
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
@@ -99,9 +118,10 @@ export default class Tabs extends View {
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
-    const enabled = shared("workspace.panels") ?? ["files", "changes"];
+    const blocks = panelBlocks(root), enabled = blocks.map(c => c.id);
     this.syncPanel(space, panel, body, enabled);
-    const panelButton = (id, label, icon) => {
+    const panelButton = (block) => {
+      const id = block.id, props = block.content?.props ?? {}, label = String(props.label ?? id), icon = props.icon;
       const on = panel && !panel.hidden && body?.active === id;
       return h_flex().id(`panel-${id}`).h(26).px(8).gap(5).flex_none().items_center().rounded(6)
         .text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
@@ -109,7 +129,7 @@ export default class Tabs extends View {
         .on_click(() => {
           if (on) run("layout.hide", { id: "panel" });
           else { run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" }); }
-        }).child(svg(icon).size(14)).child(label);
+        }).when(typeof icon === "string" && icon !== "", el => el.child(svg(icon).size(14))).child(label);
     };
     const boardNode = find(root, boardId()), boardOn = boardNode && !boardNode.hidden, needs = shared("herdr-board.needs") ?? 0;
     const boardButton = h_flex().id("panel-board").h(26).px(8).gap(5).flex_none().items_center().rounded(6)
@@ -125,8 +145,7 @@ export default class Tabs extends View {
         .children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .when(Boolean(boardNode), el => el.child(boardButton))
-      .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
-      .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
+      .children(blocks.map(panelButton))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/herdr-board-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/herdr-board-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/herdr-board-tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
