@@ -5,7 +5,7 @@
 // Settings live in Herdr's shared state ("herdr-board.settings"), so the tab bar's Board button sees them too.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, EditorState, Editor, TextareaState, Textarea } from "gpui-base";
-import { exec, run, props, theme, settings, notify, playSound, openOverlay, closeOverlay, readTextFile, shared, setShared, agents, nextCommand, layout, machines, spaces } from "herdr";
+import { exec, run, props, theme, settings, notify, playSound, openOverlay, closeOverlay, readTextFile, shared, setShared, agents, nextCommand, layout, machines, spaces, panes } from "herdr";
 
 const COLUMNS = [
   ["todo", "To do"], ["ready", "Ready"], ["running", "Running"], ["needs-you", "Needs you"], ["done", "Done"], ["archived", "Archived"],
@@ -1012,7 +1012,11 @@ export default class HerdrBoard extends View {
       const found = [];
       for (const [bi, bd] of this.bds.entries()) {
         const mine = bd.conn.machine || null;
-        const folders = [...new Set(spaces().filter((sp) => (sp.machine || null) === mine && sp.folder).map((sp) => sp.folder))];
+        // Each Space's folder, and where its terminals are now: a Space's folder can be home or empty while its terminals sit in a repo
+        const here = spaces().filter((sp) => (sp.machine || null) === mine);
+        const tabs = new Set(here.flatMap((sp) => (sp.tabs ?? []).map((tb) => tb.id)));
+        const cwds = panes().filter((pn) => tabs.has(pn.tab) && pn.cwd).map((pn) => pn.cwd);
+        const folders = [...new Set([...here.map((sp) => sp.folder).filter(Boolean), ...cwds])];
         if (!folders.length) continue;
         const r = await cli(bd.conn, ["suggest-repos", ...folders]);
         let list = [];

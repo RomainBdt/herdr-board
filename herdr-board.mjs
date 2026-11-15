@@ -1080,7 +1080,7 @@ function repoBase(path) {
   return cur && cur !== 'HEAD' ? cur : 'main';
 }
 
-// PREFIX from the name: the initials of its words (herdr-git-graph -> HGG), else its first letters (shepherdr -> SHEP);
+// PREFIX from the name: the initials of its words (herdr-git-graph -> HGG), else its first letters (shepherdr -> SHE);
 // longer, then numbered, when another repo already has it.
 function repoPrefix(name, taken) {
   const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
