@@ -16,7 +16,7 @@ const REACHED = Object.fromEntries(FINISH_WITH);
 // one color per reached state, so the Done tags are told apart at a glance
 const REACHED_COLOR = { none: "#9ca3af", local: "#e5b92e", "local-reviewed": "#a6c93a", "draft-pr": "#5cc86a", "pr-ready": "#22b8a0", merged: "#15a34a" };
 // the other tags: Done (target in plain words) blue, Blocked orange, Not reached red; none shares a color with another tag
-const TAG_COLOR = { done: "#7b93e0", blocked: "#f97316", missed: "#ef4444" };
+const TAG_COLOR = { done: "#7b93e0", blocked: "#f97316", missed: "#ef4444", shipping: "#a78bfa" };
 const BUMP ="herdr-board.bump";     // dialogs set it after a change so the board refreshes at once
 
 // same as textHash in herdr-board.mjs: the editor sends it back so a card an agent changed isn't overwritten
@@ -489,6 +489,8 @@ export default class HerdrBoard extends View {
             .text_size(10.5).text_color(t.muted).child(c.boardLabel)))
           .when(Boolean(tag), (el) => el.child(div().min_w(0).max_w(150).truncate().px(5).rounded(4).bg(t.raised)
             .text_size(10.5).font_medium().text_color(tag[1]).child(tag[0])))
+          .when(Boolean(c.shipping), (el) => el.child(div().flex_shrink_0().px(5).rounded(4).bg(t.raised)
+              .text_size(10.5).font_medium().text_color(TAG_COLOR.shipping).child("🚀 Shipping")))
           .when(live, (el) => el.child(div().flex_shrink_0().text_size(11).text_color(t.working)
             .frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90))))
         .when(!compact, (el) => el.child(div().text_size(11).text_color(t.dim).truncate().child(`${c.repo} · ${model} · ${c.done}`)))

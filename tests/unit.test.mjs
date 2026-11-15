@@ -246,3 +246,30 @@ describe('rules.md: unfixed review findings', () => {
     assert.match(lr, /Review findings that are not fixed/);
   });
 });
+
+describe('ship hooks (the "shipping" label)', () => {
+  const board = { dir: 'C:/boards/b' };
+  const hooksOf = (cfg) => Object.fromEntries(Object.entries(cfg.hooks).map(([k, v]) => [k, v.length]));
+
+  test('setShipHooks adds ours, keeps the other hooks, and never doubles when run again', () => {
+    const cfg = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo mine' }] }], Other: [] } };
+    hb.setShipHooks(cfg, board, { id: 'TST-1' });
+    hb.setShipHooks(cfg, board, { id: 'TST-1' });
+    assert.deepEqual(hooksOf(cfg), { Stop: 2, Other: 0, PreToolUse: 1, UserPromptSubmit: 1, SessionEnd: 1 });
+    assert.equal(cfg.hooks.Stop[0].hooks[0].command, 'echo mine');
+    assert.match(cfg.hooks.Stop[1].hooks[0].command, /--board "C:\/boards\/b" ship-mark TST-1$/);
+  });
+
+  test('shipEventOf reads the hook events', () => {
+    const skill = (n) => ({ hook_event_name: 'PreToolUse', tool_name: 'Skill', tool_input: { skill: n } });
+    assert.equal(hb.shipEventOf(skill('ship')), 'start');
+    assert.equal(hb.shipEventOf(skill('me:ship')), 'start');
+    assert.equal(hb.shipEventOf(skill('ship-it')), null);
+    assert.equal(hb.shipEventOf({ hook_event_name: 'UserPromptSubmit', prompt: '/ship now' }), 'start');
+    assert.equal(hb.shipEventOf({ hook_event_name: 'UserPromptSubmit', prompt: 'ship it' }), null);
+    assert.equal(hb.shipEventOf({ hook_event_name: 'Stop' }), 'stop');
+    assert.equal(hb.shipEventOf({ hook_event_name: 'SessionEnd' }), 'stop');
+    assert.equal(hb.shipEventOf({ hook_event_name: 'Notification' }), null);
+    assert.equal(hb.shipEventOf(null), null);
+  });
+});
