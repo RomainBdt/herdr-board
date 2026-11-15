@@ -1009,21 +1009,22 @@ export default class HerdrBoard extends View {
   // Nothing is added by this: each one is offered as a chip, and added only when the person confirms.
   loadSuggestions(cx) {
     cx.spawn(async (cx) => {
-      const found = [];
-      for (const [bi, bd] of this.bds.entries()) {
+      const token = this.suggRun = (this.suggRun ?? 0) + 1;   // a later call replaces this one if it is still running
+      const per = await Promise.all(this.bds.map(async (bd, bi) => {
         const mine = bd.conn.machine || null;
         // Each Space's folder, and where its terminals are now: a Space's folder can be home or empty while its terminals sit in a repo
         const here = spaces().filter((sp) => (sp.machine || null) === mine);
         const tabs = new Set(here.flatMap((sp) => (sp.tabs ?? []).map((tb) => tb.id)));
         const cwds = panes().filter((pn) => tabs.has(pn.tab) && pn.cwd).map((pn) => pn.cwd);
         const folders = [...new Set([...here.map((sp) => sp.folder).filter(Boolean), ...cwds])];
-        if (!folders.length) continue;
+        if (!folders.length) return [];
         const r = await cli(bd.conn, ["suggest-repos", ...folders]);
         let list = [];
         try { list = JSON.parse(r.out); } catch { /* an older CLI without suggest-repos: no suggestions */ }
-        if (Array.isArray(list)) for (const x of list) found.push({ ...x, b: bi });
-      }
-      this.sugg = found.filter((x) => !this.bds[x.b].repos[x.name]);
+        return Array.isArray(list) ? list.map((x) => ({ ...x, b: bi })) : [];
+      }));
+      if (token !== this.suggRun) return;
+      this.sugg = per.flat().filter((x) => !this.bds[x.b].repos[x.name]);
       cx.notify();
     });
   }
@@ -1039,22 +1040,21 @@ export default class HerdrBoard extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       const r = a.kind === "add"
-        ? await cli(bd.conn, ["add-repo", a.name, a.path, "--prefix", a.prefix, "--base", a.base, "--color", a.color, "--json"])
+        ? await cli(bd.conn, ["add-repo", a.name, a.path, "--base", a.base, "--color", a.color, "--json"])   // the prefix is worked out again there: it cannot clash with a repo added meanwhile
         : await cli(bd.conn, ["remove-repo", a.name]);
       this.repoBusy = false;
-      if (!r.ok) { this.repoMsg = r.err; cx.notify(); return; }   // the question stays: the message says why
+      const current = this.ask === a;   // false when the person moved on to another question meanwhile
+      if (!r.ok) { if (current) this.repoMsg = r.err; cx.notify(); return; }   // the question stays: the message says why
       if (a.kind === "add") {
         bd.repos[a.name] = a.color;
         this.sugg = this.sugg.filter((x) => !(x.b === a.b && x.name === a.name));
-        this.pick = { b: a.b, repo: a.name };
-        this.errs.repo = "";
+        if (current) { this.pick = { b: a.b, repo: a.name }; this.errs.repo = ""; }
       } else {
         delete bd.repos[a.name];
         if (this.pick?.b === a.b && this.pick.repo === a.name) this.pick = null;
         this.loadSuggestions(cx);   // its Space, if any, offers it again
       }
-      this.ask = null;
-      this.repoMsg = "";
+      if (current) { this.ask = null; this.repoMsg = ""; }
       setShared(BUMP, Date.now());   // the board panel reads its repos again
       cx.notify();
     });

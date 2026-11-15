@@ -1109,6 +1109,7 @@ function repoOnBoard(board, root) {
 // add-repo <name> <path> [--prefix P] [--base B] [--color #rrggbb] [--json]
 function cmdAddRepo(board, args) {
   const json = takeSwitch(args, '--json');
+  for (const f of ['--prefix', '--base', '--color']) if (args.indexOf(f) >= 0 && args.indexOf(f) === args.length - 1) die(`${f} needs a value`);
   const prefix = takeFlag(args, '--prefix');
   const base = takeFlag(args, '--base');
   const color = takeFlag(args, '--color');
@@ -1118,7 +1119,7 @@ function cmdAddRepo(board, args) {
   if (board.repos[name]) die(`repo "${name}" is already on the board (${board.repos[name].path})`);
   if (prefix !== undefined && !/^[A-Za-z][A-Za-z0-9]{0,7}$/.test(prefix)) die('prefix must be 1 to 8 letters or digits, starting with a letter');
   if (color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(color)) die('color must look like #8b5cf6');
-  if (base !== undefined && !/^[\w./-]+$/.test(base)) die(`"${base}" is not a usable branch name`);
+  if (base !== undefined && !/^[A-Za-z0-9][\w./-]*$/.test(base)) die(`"${base}" is not a usable branch name`);
   const root = repoRoot(resolve(path));
   if (!root) die(`${path} is not a git repo (or does not exist)`);
   const dupe = repoOnBoard(board, root);
@@ -1146,6 +1147,10 @@ function cmdRemoveRepo(board, args) {
   if (!name) die('usage: remove-repo <name>');
   if (!board.repos[name]) die(`unknown repo "${name}"; board.json knows: ${Object.keys(board.repos).join(', ')}`);
   const users = allCards(board).filter(c => c.meta.repo === name);
+  // a card file that cannot be read cannot be checked: do not guess that it is not using the repo
+  const readable = new Set(allCards(board).map(c => c.id));
+  const unreadable = existsSync(board.cardsDir) ? readdirSync(board.cardsDir).filter(f => f.endsWith('.md') && !readable.has(f.slice(0, -3).toUpperCase())) : [];
+  if (unreadable.length) die(`cannot check which cards use "${name}": unreadable card file(s): ${unreadable.join(', ')}`);
   const active = users.filter(c => c.meta.status !== 'archived');
   if (active.length) die(`cannot remove "${name}": ${active.length} card${active.length > 1 ? 's' : ''} still use it (${active.map(c => c.id).join(', ')}). Finish and Clean them first`);
   const file = join(board.dir, 'board.json');
@@ -1161,18 +1166,19 @@ function cmdRemoveRepo(board, args) {
 function cmdSuggestRepos(board, folders) {
   const out = [];
   const names = new Set(Object.keys(board.repos));
+  const taken = takenPrefixes(board);
+  const used = Object.values(board.repos).map(r => r.color || '');
   for (const f of folders) {
     const root = repoRoot(f);
     if (!root || repoOnBoard(board, root) || out.some(o => samePath(o.path, root))) continue;
     let name = basename(root).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '') || 'repo';
     for (let i = 2; names.has(name); i++) name = `${name.replace(/-\d+$/, '')}-${i}`;
     names.add(name);
-    const taken = takenPrefixes(board);
-    for (const o of out) taken.add(o.prefix);
-    out.push({
-      name, path: root, prefix: repoPrefix(name, taken), base: repoBase(root),
-      color: repoColor(Object.values(board.repos).map(r => r.color || '').concat(out.map(o => o.color))),
-    });
+    const prefix = repoPrefix(name, taken);
+    const color = repoColor(used);
+    taken.add(prefix);
+    used.push(color);
+    out.push({ name, path: root, prefix, base: repoBase(root), color });
   }
   console.log(JSON.stringify(out));
 }

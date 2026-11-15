@@ -576,3 +576,32 @@ describe('add-repo / remove-repo / suggest-repos', () => {
     assert.equal(Object.keys(boardJson().repos).length, 2);
   });
 });
+
+describe('add-repo / remove-repo: edge cases', () => {
+  const run = (...args) => {
+    const r = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', b.dir, ...args], { env: { ...process.env, HERDR_BOARD_HC_SCRIPT: '' }, encoding: 'utf8' });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+  const mk = (name) => {
+    const dir = join(b.dir, 'repos', name);
+    mkdirSync(dir, { recursive: true });
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+    return dir;
+  };
+
+  test('a flag with no value, or a base that looks like an option, is refused', () => {
+    const dir = mk('e1');
+    assert.match(run('add-repo', 'e1', dir, '--prefix').err, /--prefix needs a value/);
+    assert.match(run('add-repo', 'e1', dir, '--base', '-x').err, /not a usable branch name/);
+    assert.equal(Object.keys(JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8')).repos).length, 2);
+  });
+
+  test('remove-repo refuses when a card file cannot be read (it cannot tell who uses the repo)', () => {
+    run('add-repo', 'e2', mk('e2'));
+    writeFileSync(join(b.dir, 'cards', 'E2-1.md'), 'not a card');
+    const r = run('remove-repo', 'e2');
+    assert.equal(r.code, 1);
+    assert.match(r.err, /unreadable card file/);
+    assert.ok(JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8')).repos.e2);
+  });
+});
