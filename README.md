@@ -239,14 +239,16 @@ Skip `deploy.sh` then: set **Board CLI** to the `herdr-board.mjs` in this checko
 
 ## The board panel (Herdr, on the laptop)
 
-`./install.sh` installs two mods and one layout into `~/.config/herdr-app`:
+`./install.sh` installs two mods and one layout into `~/.config/herdr-app` (plus the `git-graph` mod, see below):
 
 - `herdr-board`: the board. The `board` layout has two places for it, `board-side` (a column between the sidebar
   and the chat) and `board-top` (six columns above the tabs); the Position setting picks one.
 - `herdr-board-tabs`: a copy of Herdr's tab bar with a **Board** button next to Files and Changes. It shows or hides
   the board, with a red count of cards that need you while it is hidden. It is a copy: Herdr updates to its own tab
   bar don't reach it (`herdr-board/mods/herdr-board-tabs/` holds it; redo the copy with `herdr-app do mod.clone` and re-add the button if
-  Herdr's changes).
+  Herdr's changes). It also has a **Git** button that opens the `git-graph` panel (the layout's `graph` child of
+  `panel-body`). That mod is [its own project](https://github.com/rabeeh-ta/herdr-git-graph): `install.sh` copies it
+  from `$GIT_GRAPH_DIR` (default: a `herdr-git-graph` clone next to this folder) into `mods/git-graph`.
 
 Pick the layout with `Ctrl+Shift+L`. Bind `"ctrl-alt-b": "herdr-board-tabs.toggle"` in `keys.json` to show or hide
 it from the keyboard (not Ctrl+B: Claude Code uses it).
