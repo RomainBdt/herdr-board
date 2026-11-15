@@ -239,7 +239,7 @@ Skip `deploy.sh` then: set **Board CLI** to the `herdr-board.mjs` in this checko
 
 ## The board panel (Herdr, on the laptop)
 
-`./install.sh` installs two mods and one layout into `~/.config/herdr-app` (plus the `git-graph` mod, see below):
+`./install.sh` installs two mods and one layout into `~/.config/herdr-app` (and the separate `git-graph` mod: clone [herdr-git-graph](https://github.com/rabeeh-ta/herdr-git-graph) next to this folder first, see below):
 
 - `herdr-board`: the board. The `board` layout has two places for it, `board-side` (a column between the sidebar
   and the chat) and `board-top` (six columns above the tabs); the Position setting picks one.
