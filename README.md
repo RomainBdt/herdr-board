@@ -247,13 +247,26 @@ Skip `deploy.sh` then: set **Board CLI** to the `herdr-board.mjs` in this checko
 
 - `herdr-board`: the board. The `board` layout has two places for it, `board-side` (a column between the sidebar
   and the chat) and `board-top` (six columns above the tabs); the Position setting picks one.
-- `herdr-board-tabs`: a copy of Herdr's tab bar with a **Board** button next to Files and Changes. It shows or hides
+- `herdr-board-tabs`: a copy of Herdr's tab bar with a **Board** button next to the panel buttons. It shows or hides
   the board, with a red count of cards that need you while it is hidden. It is a copy: Herdr updates to its own tab
   bar don't reach it (`herdr-board/mods/herdr-board-tabs/` holds it; redo the copy with `herdr-app do mod.clone` and re-add the button if
   Herdr's changes).
 
 Pick the layout with `Ctrl+Shift+L`. Bind `"ctrl-alt-b": "herdr-board-tabs.toggle"` in `keys.json` to show or hide
 it from the keyboard (not Ctrl+B: Claude Code uses it).
+
+**Panel buttons come from the layout.** The tab bar has one button per block in the `panel-body` stack of
+`layouts/board.json` (Files and Changes to start with), in that order. To add a panel, add a block there; its button's
+label and icon are the block's `content.props.label` and `content.props.icon` (else its id, and no icon):
+
+```json
+{ "id": "notes", "type": "block", "content": { "mod": "my-notes", "props": { "label": "Notes", "icon": "mods/my-notes/icon.svg" } } }
+```
+
+`"herdr-board-tabs.<block id>"` in `keys.json` opens that panel, or closes it when it is already shown
+(`"ctrl-alt-n": "herdr-board-tabs.notes"`). Files and Changes still follow Herdr's own panels setting. `./install.sh`
+merges the layout instead of copying it: the blocks you added to `panel-body` stay (it needs Node for that; without
+Node it leaves your layout as it is and puts the new one in `layouts/board.json.new`).
 
 ### Settings (⚙ on the board)
 
