@@ -4,6 +4,7 @@
 // No packages: Node's standard library only.
 //
 //   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | approve <id> [--model m] [--effort e] [--start] | unapprove <id> | next | start <id>
+//           add-repo <name> <path> [--prefix P] [--base B] [--color #hex] | remove-repo <name> | suggest-repos <folder>...
 //           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | resume <id> | tick | config <key> <value>
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] [--pr <url>] "<summary>"
 //
@@ -11,7 +12,7 @@
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync, rmdirSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -39,6 +40,14 @@ function takeFlag(args, name) {
   const v = args[i + 1];
   args.splice(i, 2);
   return v;
+}
+
+// A flag with no value: true (and removed) when present.
+function takeSwitch(args, name) {
+  const i = args.indexOf(name);
+  if (i < 0) return false;
+  args.splice(i, 1);
+  return true;
 }
 
 function writeAtomic(path, text) {
@@ -1038,6 +1047,136 @@ function cmdConfig(board, [key, value]) {
   if (key === 'maxParallel') startNext(loadBoard(board.dir), { quiet: true });   // more room: start what waits
 }
 
+// ---------- repos: add-repo / remove-repo / suggest-repos ----------
+// board.json "repos" is the only list of repos the board knows. Nothing here runs by itself: a repo is added or removed
+// only when the person asks (the CLI, or the panel after a confirmation).
+
+const REPO_COLORS = ['#8b5cf6', '#0ea5e9', '#22c55e', '#f97316', '#eab308', '#ec4899', '#14b8a6', '#ef4444', '#6366f1', '#84cc16', '#06b6d4', '#a855f7'];
+const REPO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function samePath(a, b) {
+  const n = (p) => { const s = slash(resolve(String(p))).replace(/\/+$/, ''); return process.platform === 'win32' ? s.toLowerCase() : s; };
+  return n(a) === n(b);
+}
+
+// The main folder of the git repo that holds `dir` (a card worktree gives back the repo it belongs to), or null
+// when `dir` is not in a git repo (or does not exist).
+function repoRoot(dir) {
+  try {
+    if (!dir || !statSync(dir).isDirectory()) return null;
+    const common = slash(git(['-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir']));
+    if (/(^|\/)\.git$/.test(common)) return slash(dirname(common));
+    return slash(git(['-C', dir, 'rev-parse', '--show-toplevel']));   // a bare repo fails here: not a repo to work in
+  } catch { return null; }
+}
+
+// The branch cards start from: origin's default, else main, else master, else the one checked out.
+function repoBase(path) {
+  const tryGit = (a) => { try { return git(['-C', path, ...a]); } catch { return ''; } };
+  const head = tryGit(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).replace(/^origin\//, '');
+  if (head) return head;
+  for (const b of ['main', 'master']) if (tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${b}`])) return b;
+  const cur = tryGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+  return cur && cur !== 'HEAD' ? cur : 'main';
+}
+
+// PREFIX from the name: the initials of its words (herdr-git-graph -> HGG), else its first letters (shepherdr -> SHEP);
+// longer, then numbered, when another repo already has it.
+function repoPrefix(name, taken) {
+  const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const flat = words.join('').toUpperCase();
+  const cands = [];
+  if (words.length > 1) cands.push(words.map(w => w[0]).join('').toUpperCase().slice(0, 4));
+  for (let n = 3; n <= 6; n++) cands.push(flat.slice(0, n));
+  const free = (p) => /^[A-Z]/.test(p) && !taken.has(p);
+  const hit = cands.find(free);
+  if (hit) return hit;
+  const stem = /^[A-Z]/.test(cands[0] || '') ? cands[0] : 'R';
+  for (let i = 2; ; i++) if (free(`${stem}${i}`)) return `${stem}${i}`;
+}
+
+function repoColor(used) {
+  const lower = new Set(used.map(c => String(c).toLowerCase()));
+  return REPO_COLORS.find(c => !lower.has(c)) || REPO_COLORS[used.length % REPO_COLORS.length];
+}
+
+function takenPrefixes(board) { return new Set(Object.entries(board.repos).map(([k, r]) => (r.prefix || k).toUpperCase())); }
+
+function repoOnBoard(board, root) {
+  return Object.entries(board.repos).find(([, r]) => r.path && samePath(r.path, root))?.[0] || null;
+}
+
+// add-repo <name> <path> [--prefix P] [--base B] [--color #rrggbb] [--json]
+function cmdAddRepo(board, args) {
+  const json = takeSwitch(args, '--json');
+  const prefix = takeFlag(args, '--prefix');
+  const base = takeFlag(args, '--base');
+  const color = takeFlag(args, '--color');
+  const [name, path] = args;
+  if (!name || !path) die('usage: add-repo <name> <path> [--prefix P] [--base B] [--color #rrggbb]');
+  if (!REPO_NAME.test(name)) die(`"${name}" is not a usable repo name (letters, digits, . _ - only)`);
+  if (board.repos[name]) die(`repo "${name}" is already on the board (${board.repos[name].path})`);
+  if (prefix !== undefined && !/^[A-Za-z][A-Za-z0-9]{0,7}$/.test(prefix)) die('prefix must be 1 to 8 letters or digits, starting with a letter');
+  if (color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(color)) die('color must look like #8b5cf6');
+  if (base !== undefined && !/^[\w./-]+$/.test(base)) die(`"${base}" is not a usable branch name`);
+  const root = repoRoot(resolve(path));
+  if (!root) die(`${path} is not a git repo (or does not exist)`);
+  const dupe = repoOnBoard(board, root);
+  if (dupe) die(`${root} is already on the board as "${dupe}"`);
+  const taken = takenPrefixes(board);
+  const entry = {
+    path: root,
+    prefix: (prefix ?? repoPrefix(name, taken)).toUpperCase(),
+    base: base ?? repoBase(root),
+    color: color ? color.toLowerCase() : repoColor(Object.values(board.repos).map(r => r.color || '')),
+  };
+  if (taken.has(entry.prefix)) die(`prefix ${entry.prefix} is already used by another repo; pick another with --prefix`);
+  const file = join(board.dir, 'board.json');
+  const raw = JSON.parse(readFileSync(file, 'utf8'));   // the raw file, so fields this code does not know are kept
+  raw.repos = { ...(raw.repos || {}), [name]: entry };
+  writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
+  console.log(json ? JSON.stringify({ name, ...entry }) : `added ${name}: ${entry.path} (prefix ${entry.prefix}, base ${entry.base}, color ${entry.color})`);
+}
+
+// remove-repo <name> [--json]: only the entry in board.json goes. Its folder, worktrees and cards stay as they are.
+// Refused while a card that is not archived still uses it: clean, resume and the agent need the repo.
+function cmdRemoveRepo(board, args) {
+  const json = takeSwitch(args, '--json');
+  const [name] = args;
+  if (!name) die('usage: remove-repo <name>');
+  if (!board.repos[name]) die(`unknown repo "${name}"; board.json knows: ${Object.keys(board.repos).join(', ')}`);
+  const users = allCards(board).filter(c => c.meta.repo === name);
+  const active = users.filter(c => c.meta.status !== 'archived');
+  if (active.length) die(`cannot remove "${name}": ${active.length} card${active.length > 1 ? 's' : ''} still use it (${active.map(c => c.id).join(', ')}). Finish and Clean them first`);
+  const file = join(board.dir, 'board.json');
+  const raw = JSON.parse(readFileSync(file, 'utf8'));
+  delete raw.repos[name];
+  writeAtomic(file, JSON.stringify(raw, null, 2) + '\n');
+  const kept = users.length ? `; ${users.length} archived card${users.length > 1 ? 's' : ''} kept (add the repo again to resume them)` : '';
+  console.log(json ? JSON.stringify({ name, archivedCards: users.length }) : `removed ${name} from the board (its folder, worktrees and cards are untouched${kept})`);
+}
+
+// suggest-repos <folder>...: of these folders (the Herdr Spaces'), the git repos that are not on the board yet, as JSON
+// [{name, path, prefix, base, color}]. A worktree of a repo gives that repo. Adds nothing.
+function cmdSuggestRepos(board, folders) {
+  const out = [];
+  const names = new Set(Object.keys(board.repos));
+  for (const f of folders) {
+    const root = repoRoot(f);
+    if (!root || repoOnBoard(board, root) || out.some(o => samePath(o.path, root))) continue;
+    let name = basename(root).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '') || 'repo';
+    for (let i = 2; names.has(name); i++) name = `${name.replace(/-\d+$/, '')}-${i}`;
+    names.add(name);
+    const taken = takenPrefixes(board);
+    for (const o of out) taken.add(o.prefix);
+    out.push({
+      name, path: root, prefix: repoPrefix(name, taken), base: repoBase(root),
+      color: repoColor(Object.values(board.repos).map(r => r.color || '').concat(out.map(o => o.color))),
+    });
+  }
+  console.log(JSON.stringify(out));
+}
+
 // Terminals (any name) whose working folder is the given folder or inside it.
 function terminalsIn(board, dir) {
   const norm = (p) => slash(String(p || '')).replace(/\/+$/, '').toLowerCase();
@@ -1220,10 +1359,10 @@ function main() {
   const [cmd, ...rest] = argv;
   const commands = {
     new: cmdNew, draft: cmdDraft, ls: cmdLs, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
-    answer: cmdAnswer, press: cmdPress, clean: cmdClean, resume: cmdResume, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
+    answer: cmdAnswer, press: cmdPress, clean: cmdClean, resume: cmdResume, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, 'add-repo': cmdAddRepo, 'remove-repo': cmdRemoveRepo, 'suggest-repos': cmdSuggestRepos, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone,
   };
   if (!cmd || !commands[cmd]) {
-    console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 9).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
+    console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
     process.exit(cmd ? 1 : 0);
   }
   try {

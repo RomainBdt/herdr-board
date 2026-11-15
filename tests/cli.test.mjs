@@ -460,3 +460,119 @@ console.log(c === 'ls' ? ${JSON.stringify(JSON.stringify({ terminals }))} : c ==
     assert.ok(lines.some(l => /"Approve and start", .*\["approve", id, "--start"\]/.test(l)));
   });
 });
+
+describe('add-repo / remove-repo / suggest-repos', () => {
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
+  // these run git for real, so they keep the PATH (the other tests hide it)
+  const run = (...args) => {
+    const r = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', b.dir, ...args], { env: { ...process.env, HERDR_BOARD_HC_SCRIPT: '' }, encoding: 'utf8' });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+  const mkRepo = (name, branch = 'main') => {
+    const dir = join(b.dir, 'repos', name);
+    mkdirSync(dir, { recursive: true });
+    git(dir, 'init', '-q', '-b', branch);
+    git(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+    return dir.split('\\').join('/');
+  };
+  const boardJson = () => JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8'));
+
+  test('adds a repo with a prefix from its name, its base branch and a new color', () => {
+    const dir = mkRepo('herdr-git-graph');
+    const r = run('add-repo', 'herdr-git-graph', dir);
+    assert.equal(r.code, 0, r.err);
+    const e = boardJson().repos['herdr-git-graph'];
+    assert.equal(e.path, dir);
+    assert.equal(e.prefix, 'HGG');
+    assert.equal(e.base, 'main');
+    assert.match(e.color, /^#[0-9a-f]{6}$/);
+    assert.equal(run('new', 'herdr-git-graph', 'First').out.slice(0, 6), 'HGG-1 ');   // usable at once
+  });
+
+  test('a single word gives its first letters; a taken prefix gets longer', () => {
+    assert.equal(run('add-repo', 'shepherdr', mkRepo('shepherdr', 'master')).code, 0);
+    assert.equal(boardJson().repos.shepherdr.prefix, 'SHE');
+    assert.equal(boardJson().repos.shepherdr.base, 'master');
+    assert.equal(run('add-repo', 'shelf', mkRepo('shelf')).code, 0);
+    assert.equal(boardJson().repos.shelf.prefix, 'SHEL');
+  });
+
+  test('--prefix, --base and --color override the defaults', () => {
+    const xdir = mkRepo('x');
+    const r = run('add-repo', 'x', xdir, '--prefix', 'zz', '--base', 'develop', '--color', '#ABCDEF', '--json');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(boardJson().repos.x, { path: xdir, prefix: 'ZZ', base: 'develop', color: '#abcdef' });
+    assert.equal(JSON.parse(r.out).prefix, 'ZZ');
+  });
+
+  test('keeps the fields and settings of board.json it does not know', () => {
+    const j = boardJson();
+    j.custom = { keep: ['me'] };
+    j.repos.app.extra = 'stay';
+    writeFileSync(join(b.dir, 'board.json'), JSON.stringify(j));
+    assert.equal(run('add-repo', 'newone', mkRepo('newone')).code, 0);
+    const after = boardJson();
+    assert.deepEqual(after.custom, { keep: ['me'] });
+    assert.equal(after.repos.app.extra, 'stay');
+    assert.equal(run('remove-repo', 'newone').code, 0);
+    assert.deepEqual(boardJson(), j);
+  });
+
+  test('refuses what cannot work', () => {
+    const dir = mkRepo('r1');
+    assert.match(run('add-repo', 'r1').err, /usage: add-repo/);
+    assert.match(run('add-repo', 'app', dir).err, /already on the board/);
+    assert.match(run('add-repo', 'bad name', dir).err, /not a usable repo name/);
+    assert.match(run('add-repo', 'r1', join(b.dir, 'nope')).err, /not a git repo/);
+    mkdirSync(join(b.dir, 'plain'));
+    assert.match(run('add-repo', 'r1', join(b.dir, 'plain')).err, /not a git repo/);
+    assert.match(run('add-repo', 'r1', dir, '--prefix', 'TST').err, /prefix TST is already used/);
+    assert.match(run('add-repo', 'r1', dir, '--color', 'red').err, /color must/);
+    assert.equal(run('add-repo', 'r1', dir).code, 0);
+    assert.match(run('add-repo', 'r2', dir).err, /already on the board as "r1"/);   // the same folder twice
+    assert.deepEqual(Object.keys(boardJson().repos), ['app', 'other', 'r1']);
+  });
+
+  test('a worktree path adds the repo it belongs to', () => {
+    const dir = mkRepo('main-repo');
+    const wt = join(b.dir, 'a-worktree').split('\\').join('/');
+    git(dir, 'worktree', 'add', '-q', '-b', 'side', wt);
+    assert.equal(run('add-repo', 'main-repo', wt).code, 0);
+    assert.equal(boardJson().repos['main-repo'].path, dir);
+  });
+
+  test('remove-repo drops only the entry, and refuses while a card still uses it', () => {
+    const dir = mkRepo('gone');
+    run('add-repo', 'gone', dir);
+    b.write('GON-1', cardText({ id: 'GON-1', title: 'x', repo: 'gone', status: 'done' }));
+    const r = run('remove-repo', 'gone');
+    assert.equal(r.code, 1);
+    assert.match(r.err, /cannot remove "gone".*GON-1/);
+    assert.ok(boardJson().repos.gone);
+    b.write('GON-1', cardText({ id: 'GON-1', title: 'x', repo: 'gone', status: 'archived' }));
+    const ok = run('remove-repo', 'gone');
+    assert.equal(ok.code, 0, ok.err);
+    assert.match(ok.out, /untouched.*1 archived card/);
+    assert.equal(boardJson().repos.gone, undefined);
+    assert.ok(existsSync(dir));          // the folder
+    assert.ok(existsSync(b.card('GON-1')));   // and the card stay
+    assert.match(run('remove-repo', 'gone').err, /unknown repo "gone"/);
+    assert.match(run('remove-repo').err, /usage: remove-repo/);
+  });
+
+  test('suggest-repos lists git folders not on the board, once each, worktrees folded into their repo', () => {
+    const known = mkRepo('known');
+    const j = boardJson(); j.repos.app.path = known; writeFileSync(join(b.dir, 'board.json'), JSON.stringify(j));
+    const fresh = mkRepo('fresh-one');
+    const wt = join(b.dir, 'fresh-wt').split('\\').join('/');
+    git(fresh, 'worktree', 'add', '-q', '-b', 'side', wt);
+    mkdirSync(join(b.dir, 'plain'));
+    const r = run('suggest-repos', known, fresh, wt, join(b.dir, 'plain'), join(b.dir, 'missing'));
+    assert.equal(r.code, 0, r.err);
+    const list = JSON.parse(r.out);
+    assert.equal(list.length, 1);
+    assert.deepEqual({ name: list[0].name, path: list[0].path, prefix: list[0].prefix, base: list[0].base }, { name: 'fresh-one', path: fresh, prefix: 'FO', base: 'main' });
+    assert.deepEqual(boardJson().repos.app.path, known);   // nothing was added
+    assert.equal(Object.keys(boardJson().repos).length, 2);
+  });
+});
