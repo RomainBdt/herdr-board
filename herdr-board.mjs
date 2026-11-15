@@ -683,10 +683,10 @@ function chooseAuto(board, card) {
 }
 
 function cmdApprove(board, args) {
-  const model = takeFlag(args, '--model');
-  const effort = takeFlag(args, '--effort');
   const startNow = args.includes('--start');
   if (startNow) args.splice(args.indexOf('--start'), 1);
+  const model = takeFlag(args, '--model');
+  const effort = takeFlag(args, '--effort');
   const [id] = args;
   if (!id) die('usage: approve <id> [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max] [--start]');
   const card = loadCard(board, id);
@@ -701,17 +701,13 @@ function cmdApprove(board, args) {
   if ((card.meta.status || 'todo') === 'todo') card.meta.status = 'ready';
   saveCard(card);
   console.log(`${card.id}: ready (${card.meta.model}/${card.meta.effort})`);
-  if (!startNow || card.meta.status !== 'ready') return;
+  if (!startNow) return;
+  if (card.meta.status !== 'ready') { console.log(`${card.id}: is ${card.meta.status}, not started again (use start to restart it)`); return; }
   // --start: run it now when a slot is free (maxParallel still applies); otherwise it waits in Ready like a plain approve
   const running = busyCount(board);
   if (running >= board.maxParallel) { console.log(`${card.id}: all slots are taken (${running}/${board.maxParallel} running): waiting in Ready`); return; }
   try { startCard(board, card); }
-  catch (e) {
-    const fresh = loadCard(board, card.id);
-    fresh.meta.start_error = String(e.message).replace(/\s+/g, ' ').slice(0, 200);
-    saveCard(fresh);
-    die(`${card.id}: approved but could not start: ${fresh.meta.start_error}`);
-  }
+  catch (e) { die(`${card.id}: approved but could not start: ${recordStartError(board, card.id, e)}`); }
   console.log(`${card.id}: started as ${termName(card.id)}`);
 }
 
@@ -747,6 +743,14 @@ function busyCount(board) {
   }).length;
 }
 
+// Put the reason a card could not start on the card (it then waits for a person) and return it.
+function recordStartError(board, id, e) {
+  const fresh = loadCard(board, id);
+  fresh.meta.start_error = String(e.message).replace(/\s+/g, ' ').slice(0, 200);
+  saveCard(fresh);
+  return fresh.meta.start_error;
+}
+
 // Called by you (next) and by agents (ask, done). A card that fails to start gets the reason on it;
 // the caller's own command still succeeds.
 function startNext(board, { quiet = false } = {}) {
@@ -760,10 +764,7 @@ function startNext(board, { quiet = false } = {}) {
       started.push(c.id);
       free--;
     } catch (e) {
-      const fresh = loadCard(board, c.id);
-      fresh.meta.start_error = String(e.message).replace(/\s+/g, ' ').slice(0, 200);
-      saveCard(fresh);
-      console.log(`${c.id}: could not start: ${fresh.meta.start_error}`);
+      console.log(`${c.id}: could not start: ${recordStartError(board, c.id, e)}`);
     }
   }
   if (!quiet || started.length) console.log(started.length ? `started: ${started.join(', ')}` : `nothing to start (${running}/${board.maxParallel} running)`);
