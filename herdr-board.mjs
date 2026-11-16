@@ -1414,21 +1414,28 @@ function cmdResume(board, [id]) {
 
 // ---------- setup ----------
 
-// The id of this copy of the CLI (a hash of its text, line endings ignored): the same file gives the same id on every
-// machine, so the panel can tell a server copy made by deploy.sh from a newer checkout.
-function cliVersion() { return textHash(readFileSync(fileURLToPath(import.meta.url), 'utf8').replace(/\r/g, '')); }
+// The id of this copy of the CLI: a hash of the files deploy.sh copies (line endings ignored), so the same checkout gives
+// the same id on every machine and the panel can tell an older server copy.
+const DEPLOYED = ['herdr-board.mjs', 'check.mjs', 'rules.md', 'draft-rules.md', 'card-template.md'];   // what deploy.sh copies: keep in step
+let cliId;   // read once: the files cannot change under a running process
+function cliVersion() {
+  cliId ??= textHash(DEPLOYED.map(f => { try { return readFileSync(join(HERE, f), 'utf8').replace(/\r/g, ''); } catch { return ''; } }).join('\0'));
+  return cliId;
+}
 
 // init <folder> [--name N] [--worktrees D]: a new board. Never touches an existing one.
 function cmdInit(args) {
   const name = takeFlag(args, '--name');
   const worktrees = takeFlag(args, '--worktrees');
-  const [folder] = args;
-  if (!folder) die('usage: init <folder> [--name N] [--worktrees D]');
+  const [folder, ...extra] = args;
+  if (!folder || extra.length || [name, worktrees].some(v => v?.startsWith('--'))) die('usage: init <folder> [--name N] [--worktrees D]');
   const dir = resolve(folder), file = join(dir, 'board.json');
   if (existsSync(file)) die(`${slash(file)} already exists: that folder already holds a board`);
-  mkdirSync(join(dir, 'cards'), { recursive: true });
   const board = { name: name || basename(dir), maxParallel: 2, worktrees: slash(worktrees ? resolve(worktrees) : join(dir, 'worktrees')), repos: {} };
-  writeAtomic(file, JSON.stringify(board, null, 2) + '\n');
+  try {
+    mkdirSync(join(dir, 'cards'), { recursive: true });
+    writeAtomic(file, JSON.stringify(board, null, 2) + '\n');
+  } catch (e) { die(`cannot create the board in ${slash(dir)}: ${e.message}`); }
   console.log(`created ${slash(file)} and ${slash(join(dir, 'cards'))}`);
   console.log(`next: node ${slash(fileURLToPath(import.meta.url))} --board ${slash(dir)} add-repo <name> <path of a git repo>`);
   console.log('then put the same two paths (this CLI and the folder) in the panel: ⚙ → Boards');

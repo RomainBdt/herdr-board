@@ -747,3 +747,25 @@ describe('init and version', () => {
     assert.equal(b.run('version').out.trim(), v.out.trim());
   });
 });
+
+describe('init: bad arguments and version', () => {
+  const free = (...args) => spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), ...args], { env: isolatedEnv(), encoding: 'utf8' });
+  test('a flag without a value, or a second folder, is a usage error and makes nothing', () => {
+    const dir = join(b.dir, 'x');
+    for (const a of [[dir, '--name', '--worktrees', 'w'], [dir, 'other'], ['--name', 'N']]) {
+      const r = free('init', ...a);
+      assert.equal(r.status, 1, a.join(' '));
+      assert.match(r.stderr, /usage: init/);
+    }
+    assert.ok(!existsSync(dir));
+  });
+  test('a folder that cannot be made is a one-line error', () => {
+    const r = free('init', join(b.dir, 'board.json', 'sub'));   // a file in the way
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /cannot create the board/);
+    assert.doesNotMatch(r.stderr, /\n\s+at /);
+  });
+  test('the version also covers the other files deploy.sh copies', () => {
+    assert.match(readFileSync(join(ROOT, 'deploy.sh'), 'utf8'), /herdr-board\.mjs check\.mjs rules\.md draft-rules\.md card-template\.md/);
+  });
+});

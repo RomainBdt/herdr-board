@@ -134,3 +134,15 @@ describe('what the header says', () => {
     assert.deepEqual(await read([REMOTE], {}, { dataprep: { cli: 'bbb' } }), []);
   });
 });
+
+describe('the reference CLI', () => {
+  test('a local CLI too old to report an id is no reference', async () => {
+    world.shared['herdr-board.settings'] = { boards: [LOCAL, REMOTE] };
+    world.exec = (o) => ({ code: 0, stdout: JSON.stringify({ board: 'b', cards: [], repos: {}, ...(o.on ? { cli: 'bbb' } : {}) }), stderr: '' });
+    const v = new Panel(); world.props = {}; v.init({}, cx); v.srcs = {};
+    for (const c of [LOCAL, REMOTE]) v.refreshOne(cx, { machine: c.machine || null, script: c.script, board: c.board });
+    await new Promise((r) => setTimeout(r, 5));
+    world.exec = null;
+    assert.deepEqual(v.errors(), []);
+  });
+});

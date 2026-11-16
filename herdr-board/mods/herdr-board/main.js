@@ -76,13 +76,15 @@ function allOff() { return stored().length > 0 && stored().every((c) => c.off &&
 function connKey(c) { return `${c.machine || ""}|${c.script}|${c.board}`; }
 function machineName(c) { return c.machine || "This computer"; }
 // The CLI id a board's `ls --json` reports: "" when its herdr-board.mjs is too old to report one, null before it was read.
-// A board on another machine is flagged when it differs from this computer's board (the reference); no local board, no flag.
+// A board on another machine is flagged (stale) when it differs from this computer's board, the reference. No local board,
+// or a local one too old to report an id: no reference, no flag. Gives {text, stale}.
 function cliNote(cli, conn, refCli) {
-  if (cli == null) return "";
+  if (cli == null) return { text: "", stale: false };
   const own = cli ? `version ${cli}` : "version unknown (an older herdr-board.mjs)";
-  return conn.machine && refCli != null && cli !== refCli ? `${own}, not the same as this computer's. Run ./deploy.sh again.` : own;
+  const stale = Boolean(conn.machine && refCli && cli !== refCli);
+  return { text: stale ? `${own}, not the same as this computer's. Run ./deploy.sh again.` : own, stale };
 }
-function refCliOf(list) { return list.find((x) => !x.conn.machine && x.cli != null)?.cli ?? null; }
+function refCliOf(list) { return list.find((x) => !x.conn.machine && x.cli)?.cli ?? null; }
 // A card id is unique on its own board only: the same repo on two machines gives two HB-4.
 function safeId(s) { return String(s).replace(/[^A-Za-z0-9_-]/g, "-"); }
 
@@ -570,7 +572,8 @@ export default class HerdrBoard extends View {
   // One line per board that can't be read, and per board on another machine whose CLI differs from this computer's.
   errors() {
     const b = this.boards(), ref = refCliOf(b);
-    const stale = b.filter((x) => !x.error && cliNote(x.cli, x.conn, ref).includes("deploy.sh")).map((x) => `${x.label}: ${cliNote(x.cli, x.conn, ref)}`);
+    const notes = b.filter((x) => !x.error).map((x) => ({ x, n: cliNote(x.cli, x.conn, ref) }));
+    const stale = notes.filter(({ n }) => n.stale).map(({ x, n }) => `${x.label}: ${n.text}`);
     return [...b.filter((x) => x.error).map((x) => (b.length > 1 ? `${x.label}: ${x.error}` : x.error)), ...stale];
   }
   errorText() { return this.errors().join(" · "); }
@@ -785,7 +788,7 @@ export default class HerdrBoard extends View {
         .when(r.cli != null, (el) => {
           const ref = refCliOf(this.rows.filter((o) => o.enabled).map((o) => ({ conn: this.rowConn(o), cli: o.cli })));
           const note = cliNote(r.cli, this.rowConn(r), ref);
-          return el.child(div().text_size(11).text_color(note.includes("deploy.sh") ? t.blocked : t.dim).child(note));
+          return el.child(div().text_size(11).text_color(note.stale ? t.blocked : t.dim).child(note.text));
         })))
       .child(row("Board folder", "Holds board.json and cards/", field(r.boardDir)))
       .child(row("Agents at once", "Saved in its board.json",
