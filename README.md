@@ -114,7 +114,7 @@ The tool rewrites a **Next action** section at the top of each card, so you alwa
 
 1. Install Herdr, `hc`, Node 18+, git and Claude Code (and `gh` for pull-request targets). See [What you need](#what-you-need).
 2. Try it on **one computer**: leave Machine empty in the panel settings and point *Board CLI* at `herdr-board.mjs` in this checkout.
-3. Create a board folder with a `board.json` that lists your repos ([example](#boardjson)).
+3. Make a board: `node herdr-board.mjs init <folder>`, then `--board <folder> add-repo <name> <path>` for each repo ([board.json](#boardjson)).
 4. Run `./install.sh`, pick the `board` layout with `Ctrl+Shift+L`, open ⚙ → Boards and fill in the paths.
 5. Click **+**, write a card, approve, **▶ Start next**.
 
@@ -133,7 +133,8 @@ For a separate machine, run `./deploy.sh <machine> <folder>` to copy the CLI the
 
 ## Install
 
-1. **Where the repos are ("the server")**: create a board folder with a `board.json` (see below), then
+1. **Where the repos are ("the server")**: make a board with `node herdr-board.mjs init <folder>` (it writes `board.json`
+   and `cards/`, and refuses a folder that already has a board), add its repos with `add-repo` (or in the panel), then
    `./deploy.sh <machine> <folder>` copies the CLI there (`<machine>` is a name from `hc machine ls`).
 2. **Where you work (the laptop)**: `./install.sh` installs the panel and the layout into Herdr. Pick the layout
    with `Ctrl+Shift+L`, open ⚙ → Boards and set the machine, the path of `herdr-board.mjs` and the board folder.
@@ -195,6 +196,8 @@ Run on the server, or from the laptop with `hc exec --on <machine> "node <dir>/h
 | you | `add-repo <name> <path> [--prefix P] [--base B] [--color #hex]` | put a git repo in `board.json`. Prefix (the initials of the name: `herdr-git-graph` gives `HGG`), base branch (origin's default, else `main`, `master`, the checked-out one) and color (the first unused one) are chosen for you; the flags override them. A worktree path adds the repo it belongs to. Never runs by itself |
 | you | `remove-repo <name>` | take a repo out of `board.json`. Its folder, worktrees and cards are not touched. Refused while a card that is not archived still uses it (the message lists them) |
 | you | `suggest-repos <folder>...` | of these folders, the git repos not on the board yet, as JSON (what the panel's **+** form calls with the Herdr Spaces' folders). Adds nothing |
+| you | `init <folder> [--name N] [--worktrees D]` | a new board: makes `board.json` (name, `maxParallel` 2, `worktrees` default `<folder>/worktrees`, no repos) and `cards/`. Needs no board (do not pass `--board`). Refuses a folder that already has a `board.json`. Then `add-repo`, and set the same two paths in the panel |
+| you | `version` | the id of this copy of the CLI (a hash of the file, line endings ignored). The same file gives the same id on every machine; `ls --json` reports it as `cli` |
 | you | `ls [--json]` | the board; `--json` is what the Herdr panel reads |
 | you | `clean <id>` | stop its agent and any terminal sitting in its worktree (when it has no uncommitted changes; busy folders are retried for a few seconds), then as the board's Clean settings say: remove its worktree, delete its branch, move the card to `archived` (all on by default; set with `config cleanWorktree`, `cleanBranch`, `cleanArchive` `on`/`off`) |
 | agent | `where` / `ask` / `done [--state s] [--pr url]` | update its own card; never edits the file directly. `--state` (`reached` default, `partial`, `blocked`, `failed`, `abandoned`) decides the tag shown on a Done card: the Finish-with state reached (None, Local commit, Local + review, Draft PR, PR ready, Merged), "Blocked", or "Not reached" |
@@ -268,6 +271,44 @@ label and icon are the block's `content.props.label` and `content.props.icon` (e
 merges the layout instead of copying it: the blocks you added to `panel-body` stay (it needs Node for that; without
 Node it leaves your layout as it is and puts the new one in `layouts/board.json.new`).
 
+### Adding the board to a layout with its own tab bar
+
+`install.sh` and the `board` layout give you the Board button, the Position setting and `ctrl-alt-b` through
+`herdr-board-tabs`. If you already have your own layout and tab bar, you can keep them. The panel only needs three things
+from your layout and tab bar; `herdr-board-tabs` is just one way to build them:
+
+1. **The hidden board column.** Copy the `herdr-board` mod folder to `mods/` and add a node with the id `board-side`
+   (`board-top` for the band across the top) to your layout, hidden. Its `slot` prop must match the id:
+
+   ```json
+   { "id": "board-side", "type": "block", "hidden": true, "size": { "px": 330 }, "min": 260, "max": 520, "background": "chrome",
+     "content": { "mod": "herdr-board", "props": { "slot": "side" } } }
+   ```
+
+   Put it in the root row next to the sidebar. Only the copy the Position setting picks reads the boards (side by default),
+   and it keeps reading while hidden, so the red count and the toasts work.
+2. **A button that shows or hides it.** In your tab bar mod, run `layout.show` or `layout.hide` on that id:
+
+   ```js
+   import { run, layout, shared } from "herdr";
+   const find = (n, id) => n?.id === id ? n : (n?.children ?? []).map(c => find(c, id)).find(Boolean) ?? null;
+   const slot = { side: "board-side", top: "board-top" }[(shared("herdr-board.settings") ?? {}).position ?? "side"];
+   const toggleBoard = () => { const n = find(layout(), slot); if (n) run(n.hidden ? "layout.show" : "layout.hide", { id: slot }); };
+   ```
+
+   Call `toggleBoard` from the button's click handler (and from a `nextCommand()` loop if you want a key). The same
+   `herdr-board.settings` has the Position, so the button follows it.
+3. **The red count.** The panel keeps the number of cards that need you in `shared("herdr-board.needs")`. Read it in the
+   button and show it while the board is hidden:
+
+   ```js
+   const needs = shared("herdr-board.needs") ?? 0;   // in render: show it when the node is hidden and needs > 0
+   ```
+
+Bind a key in `keys.json` to whatever command your tab bar mod handles. If you have no tab bar to change, skip the button:
+the panel still works as a plain mod in any slot, and ⚙ → Boards is reached from its header. The working copy of all this is
+`herdr-board/mods/herdr-board-tabs/main.js` (`boardId`, `toggleBoard`, `boardButton`).
+
 ### Settings (⚙ on the board)
 
 | | |
@@ -280,9 +321,11 @@ Node it leaves your layout as it is and puts the new one in `layouts/board.json.
 | Refresh every | 5 s, 15 s, 1 min |
 | Alerts | toast + sound when a card needs you; when one is done (off by default: Herdr already tells you) |
 | Auto-start / Auto-start every | per board, saved in its `board.json`: on or off, and 1, 5, 10, 15, 30 or 60 minutes |
-| Boards | one or more, each switched On or Off independently: each is a machine, the path of `herdr-board.mjs` and of the board folder on it, and its own Agents at once and Clean button behavior (saved in that board's `board.json` with `herdr-board config ...`) |
+| Boards | one or more, each switched On or Off independently: each is a machine, the path of `herdr-board.mjs` and of the board folder on it (a new board row starts with the paths of the row above: change them for that machine), the CLI version, and its own Agents at once and Clean button behavior (saved in that board's `board.json` with `herdr-board config ...`) |
 
-Display and connection settings are kept in Herdr's shared state (`herdr-board.settings`).
+Display and connection settings are kept in Herdr's shared state (`herdr-board.settings`). Herdr ignores edits to its
+`shared.json` while it runs, so the Boards list can only be changed in this dialog (or by a mod calling `setShared`); a
+file the mod reads for it was left out. A board that can't be read says which machine and path failed in the header.
 
 ### Several machines at once
 
@@ -292,6 +335,16 @@ every button (Approve, Start, Answer, Open, Clean, the card editor) runs on that
 board's repo the new card is for; **Start next** runs on every board. A board that can't be read (ssh
 down) keeps its last cards and shows its error in the header; the others carry on. Deploy the CLI to each machine
 with `./deploy.sh` (or point the local board at this checkout).
+
+**Is the server's copy up to date?** `deploy.sh` copies a snapshot, so a later `git pull` here does not reach it. ⚙ → Boards
+shows each board's CLI version under its *Board CLI* path, and the panel header warns when a board on another machine
+has a different version from this computer's board (or an older CLI that reports none): run `./deploy.sh` again. By hand,
+compare the two ids:
+
+```
+node herdr-board.mjs version                                    # this checkout
+hc exec --on <machine> "node <dir>/herdr-board.mjs version"      # the server's copy
+```
 
 ### Using it
 

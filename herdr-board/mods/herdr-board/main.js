@@ -37,13 +37,14 @@ const DEFAULTS = {
   // Older settings had one connection in machine/script/board; conns() reads those when boards is absent.
   machine: "", script: "", board: "",   // empty until set in ⚙ → Boards
 };
-// One short line for the header, from whatever the CLI or node printed.
+// One short line for the header, from whatever the CLI or node printed. It names the machine and the path that failed.
 function explain(err, c) {
-  if (/Cannot find module/.test(err)) return `No board CLI at ${c.script}. Check ⚙ → Boards.`;
-  if (/no board\.json/.test(err)) return `No board.json in ${c.board}. Check ⚙ → Boards.`;
-  if (/not recognized|ENOENT|command not found/.test(err)) return "Node isn't installed (or not on the PATH) on that machine.";
+  const m = machineName(c);
+  if (/Cannot find module/.test(err)) return `No board CLI at ${c.script} on ${m}. Check ⚙ → Boards.`;
+  if (/no board\.json/.test(err)) return `No board.json in ${c.board} on ${m}. Check ⚙ → Boards.`;
+  if (/not recognized|ENOENT|command not found/.test(err)) return `Node isn't installed (or not on the PATH) on ${m}.`;
   const line = (err || "").split("\n").map((l) => l.trim()).find((l) => l && !/^at |^node:|^\^|^throw/.test(l));
-  return (line || "Cannot read the board.").slice(0, 160);
+  return `${m}: ${(line || "Cannot read the board.").slice(0, 160)}`;
 }
 
 function findNode(node, id) {
@@ -74,6 +75,14 @@ function configured() { return conns().some((c) => c.script && c.board); }
 function allOff() { return stored().length > 0 && stored().every((c) => c.off && c.script && c.board); }
 function connKey(c) { return `${c.machine || ""}|${c.script}|${c.board}`; }
 function machineName(c) { return c.machine || "This computer"; }
+// The CLI id a board's `ls --json` reports: "" when its herdr-board.mjs is too old to report one, null before it was read.
+// A board on another machine is flagged when it differs from this computer's board (the reference); no local board, no flag.
+function cliNote(cli, conn, refCli) {
+  if (cli == null) return "";
+  const own = cli ? `version ${cli}` : "version unknown (an older herdr-board.mjs)";
+  return conn.machine && refCli != null && cli !== refCli ? `${own}, not the same as this computer's. Run ./deploy.sh again.` : own;
+}
+function refCliOf(list) { return list.find((x) => !x.conn.machine && x.cli != null)?.cli ?? null; }
 // A card id is unique on its own board only: the same repo on two machines gives two HB-4.
 function safeId(s) { return String(s).replace(/[^A-Za-z0-9_-]/g, "-"); }
 
@@ -235,7 +244,7 @@ export default class HerdrBoard extends View {
   boards() {
     const list = conns().map((conn, i) => {
       const src = this.srcs[connKey(conn)] ?? {};
-      return { conn, i, data: src.data ?? null, error: src.error ?? "", name: src.data?.board || machineName(conn) };
+      return { conn, i, data: src.data ?? null, error: src.error ?? "", cli: src.data ? src.data.cli ?? "" : null, name: src.data?.board || machineName(conn) };
     });
     for (const b of list) {
       const twin = list.some((o) => o !== b && o.name === b.name);
@@ -392,7 +401,7 @@ export default class HerdrBoard extends View {
   openSettings() {
     // what each board's board.json says, so the dialog shows it at once
     const server = Object.fromEntries(this.boards().filter((b) => b.data)
-      .map((b) => [connKey(b.conn), { maxParallel: b.data.maxParallel, autoStart: b.data.autoStart, clean: b.data.clean, name: b.data.board }]));
+      .map((b) => [connKey(b.conn), { maxParallel: b.data.maxParallel, autoStart: b.data.autoStart, clean: b.data.clean, name: b.data.board, cli: b.cli }]));
     openOverlay({ mod: "herdr-board", kind: "dialog", width: 600, height: 0.85, props: { dialog: "settings", server } });
   }
 
@@ -558,9 +567,11 @@ export default class HerdrBoard extends View {
     if (b.length === 1) return b[0].data ? `${b[0].data.running}/${b[0].data.maxParallel} running` : configured() ? "loading…" : "";
     return b.map((x) => `${x.label} ${x.data ? `${x.data.running}/${x.data.maxParallel}` : "…"}`).join(" · ");
   }
+  // One line per board that can't be read, and per board on another machine whose CLI differs from this computer's.
   errors() {
-    const b = this.boards();
-    return b.filter((x) => x.error).map((x) => (b.length > 1 ? `${x.label}: ${x.error}` : x.error));
+    const b = this.boards(), ref = refCliOf(b);
+    const stale = b.filter((x) => !x.error && cliNote(x.cli, x.conn, ref).includes("deploy.sh")).map((x) => `${x.label}: ${cliNote(x.cli, x.conn, ref)}`);
+    return [...b.filter((x) => x.error).map((x) => (b.length > 1 ? `${x.label}: ${x.error}` : x.error)), ...stale];
   }
   errorText() { return this.errors().join(" · "); }
 
@@ -636,7 +647,7 @@ export default class HerdrBoard extends View {
 
   makeRow(cx, c, known) {
     const row = { n: this.serial++, enabled: !c.off, machine: c.machine || "", maxParallel: known?.maxParallel ?? null,
-      autoStart: known?.autoStart ?? null, clean: known?.clean ?? null, name: known?.name ?? "" };
+      autoStart: known?.autoStart ?? null, clean: known?.clean ?? null, name: known?.name ?? "", cli: known?.cli ?? null };
     row.script = InputState.new({ value: c.script });
     row.boardDir = InputState.new({ value: c.board });
     // Agents at once: any whole number, typed (Enter or leaving the field) or stepped with - / +
@@ -661,15 +672,15 @@ export default class HerdrBoard extends View {
   loadRow(cx, row) {
     const conn = this.rowConn(row);
     row.loaded = connKey(conn);
-    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); row.par.set_value(""); return; }
+    if (!conn.script || !conn.board) { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "", cli: null }); row.par.set_value(""); return; }
     cx.spawn(async (cx) => {
       const r = await cli(conn, ["ls", "--json"]);
       if (connKey(this.rowConn(row)) !== connKey(conn)) return;   // changed meanwhile
       try {
         const d = JSON.parse(r.out);
-        Object.assign(row, { maxParallel: d.maxParallel, autoStart: d.autoStart, clean: d.clean ?? null, name: d.board });
+        Object.assign(row, { maxParallel: d.maxParallel, autoStart: d.autoStart, clean: d.clean ?? null, name: d.board, cli: d.cli ?? "" });
         row.par.set_value(d.maxParallel == null ? "" : String(d.maxParallel));
-      } catch { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "" }); row.par.set_value(""); }
+      } catch { Object.assign(row, { maxParallel: null, autoStart: null, clean: null, name: "", cli: null }); row.par.set_value(""); }
       cx.notify();
     });
   }
@@ -770,7 +781,12 @@ export default class HerdrBoard extends View {
       .child(row("Machine", "Where its repos and agents are",
         seg(`mach-${r.n}`, [...new Set([r.machine, ...known])].map((m) => [m, m || "This computer"]), r.machine,
           (v, cx) => { r.machine = v; this.saveRows(cx); })))
-      .child(row("Board CLI", "herdr-board.mjs on that machine", field(r.script)))
+      .child(row("Board CLI", "herdr-board.mjs on that machine", v_flex().gap(2).child(field(r.script))
+        .when(r.cli != null, (el) => {
+          const ref = refCliOf(this.rows.filter((o) => o.enabled).map((o) => ({ conn: this.rowConn(o), cli: o.cli })));
+          const note = cliNote(r.cli, this.rowConn(r), ref);
+          return el.child(div().text_size(11).text_color(note.includes("deploy.sh") ? t.blocked : t.dim).child(note));
+        })))
       .child(row("Board folder", "Holds board.json and cards/", field(r.boardDir)))
       .child(row("Agents at once", "Saved in its board.json",
         (() => {

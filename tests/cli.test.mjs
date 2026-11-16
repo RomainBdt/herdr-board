@@ -694,3 +694,56 @@ describe('add-repo / remove-repo: edge cases', () => {
     assert.ok(JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8')).repos.e2);
   });
 });
+
+describe('init and version', () => {
+  const fresh = () => join(b.dir, 'new-board');
+  const runFree = (...args) => {   // no --board: there is no board yet
+    const r = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), ...args], { env: isolatedEnv(), encoding: 'utf8' });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+
+  test('init makes board.json and cards/, and the board then works', () => {
+    const r = runFree('init', fresh());
+    assert.equal(r.code, 0, r.err);
+    assert.ok(existsSync(join(fresh(), 'cards')));
+    const j = JSON.parse(readFileSync(join(fresh(), 'board.json'), 'utf8'));
+    assert.equal(j.name, 'new-board');
+    assert.equal(j.maxParallel, 2);
+    assert.match(j.worktrees, /new-board\/worktrees$/);
+    assert.deepEqual(j.repos, {});
+    const ls = spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', fresh(), 'ls', '--json'], { env: isolatedEnv(), encoding: 'utf8' });
+    assert.equal(ls.status, 0, ls.stderr);
+    assert.deepEqual(JSON.parse(ls.stdout).cards, []);
+  });
+
+  test('init makes missing parent folders and takes --name and --worktrees', () => {
+    const dir = join(fresh(), 'a', 'b');
+    const r = runFree('init', dir, '--name', 'Payments', '--worktrees', join(b.dir, 'wt'));
+    assert.equal(r.code, 0, r.err);
+    const j = JSON.parse(readFileSync(join(dir, 'board.json'), 'utf8'));
+    assert.equal(j.name, 'Payments');
+    assert.match(j.worktrees, /\/wt$/);
+  });
+
+  test('init refuses an existing board.json and leaves it as it was', () => {
+    const before = readFileSync(join(b.dir, 'board.json'), 'utf8');
+    const r = runFree('init', b.dir);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /already holds a board/);
+    assert.equal(readFileSync(join(b.dir, 'board.json'), 'utf8'), before);
+  });
+
+  test('init needs a folder', () => {
+    const r = runFree('init');
+    assert.equal(r.code, 1);
+    assert.match(r.err, /usage: init <folder>/);
+  });
+
+  test('version prints the id of this copy, the same one ls --json reports, with or without a board', () => {
+    const v = runFree('version');
+    assert.equal(v.code, 0, v.err);
+    assert.match(v.out.trim(), /^[0-9a-f]+$/);
+    assert.equal(JSON.parse(b.run('ls', '--json').out).cli, v.out.trim());
+    assert.equal(b.run('version').out.trim(), v.out.trim());
+  });
+});

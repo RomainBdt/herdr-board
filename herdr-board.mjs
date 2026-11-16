@@ -6,6 +6,7 @@
 //   you:    new <repo> "<title>" [--fields <enc> | --fields-file <json>] | draft <repo> ["<title>"] [--fields <enc>] | approve <id> [--model m] [--effort e] [--start] | unapprove <id> | next | start <id>
 //           add-repo <name> <path> [--prefix P] [--base B] [--color #hex] | remove-repo <name> | suggest-repos <folder>...
 //           press <id> <key>... | show <id> | update <id> --hash <h> --fields <enc> | answer <id> ["<text>"] | ls [--json] | clean <id> | resume <id> | tick | config <key> <value>
+//   setup:  init <folder> [--name N] [--worktrees D]   (a new board: needs no board.json) | version   (this copy's id; `ls --json` shows it too)
 //   agent:  where <id> "<goal>" "<done>" "<next>" | ask <id> "<q1>" ["<q2>" ...] | done <id> [--state <s>] [--pr <url>] "<summary>"
 //   hook:   ship-mark <id>   (run by the card's Claude Code hooks, event JSON on stdin: shows or hides the "shipping" label)
 //
@@ -559,7 +560,7 @@ function cmdLs(board, args) {
   const running = cards.filter(c => c.column === 'running').length;   // same rule as the queue's free slots
   if (args.includes('--json')) {
     const repos = Object.fromEntries(Object.entries(board.repos).map(([k, r]) => [k, r.color || '#888888']));
-    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, autoStart: board.autoStart, clean: board.clean, running, repos, cards }, null, 2));
+    console.log(JSON.stringify({ board: board.name || '', maxParallel: board.maxParallel, autoStart: board.autoStart, clean: board.clean, running, repos, cards, cli: cliVersion() }, null, 2));
     return;
   }
   console.log(`${board.name || 'board'}: ${running}/${board.maxParallel} running`);
@@ -1411,6 +1412,28 @@ function cmdResume(board, [id]) {
   console.log(`${card.id}: resumed as ${termName(card.id)} (session ${session})`);
 }
 
+// ---------- setup ----------
+
+// The id of this copy of the CLI (a hash of its text, line endings ignored): the same file gives the same id on every
+// machine, so the panel can tell a server copy made by deploy.sh from a newer checkout.
+function cliVersion() { return textHash(readFileSync(fileURLToPath(import.meta.url), 'utf8').replace(/\r/g, '')); }
+
+// init <folder> [--name N] [--worktrees D]: a new board. Never touches an existing one.
+function cmdInit(args) {
+  const name = takeFlag(args, '--name');
+  const worktrees = takeFlag(args, '--worktrees');
+  const [folder] = args;
+  if (!folder) die('usage: init <folder> [--name N] [--worktrees D]');
+  const dir = resolve(folder), file = join(dir, 'board.json');
+  if (existsSync(file)) die(`${slash(file)} already exists: that folder already holds a board`);
+  mkdirSync(join(dir, 'cards'), { recursive: true });
+  const board = { name: name || basename(dir), maxParallel: 2, worktrees: slash(worktrees ? resolve(worktrees) : join(dir, 'worktrees')), repos: {} };
+  writeAtomic(file, JSON.stringify(board, null, 2) + '\n');
+  console.log(`created ${slash(file)} and ${slash(join(dir, 'cards'))}`);
+  console.log(`next: node ${slash(fileURLToPath(import.meta.url))} --board ${slash(dir)} add-repo <name> <path of a git repo>`);
+  console.log('then put the same two paths (this CLI and the folder) in the panel: ⚙ → Boards');
+}
+
 // ---------- main ----------
 
 // The tests import this file for its functions. Node 24.2+ tells whether this file was started directly
@@ -1421,12 +1444,16 @@ function main() {
   const argv = process.argv.slice(2);
   const boardDir = resolve(takeFlag(argv, '--board') || process.env.HERDR_BOARD || join(HERE, '..', 'board'));
   const [cmd, ...rest] = argv;
+  if (cmd === 'version') return console.log(cliVersion());
+  if (cmd === 'init') {   // there is no board yet: it must not load one
+    try { return cmdInit(rest); } catch (e) { console.error(`herdr-board: ${e instanceof BoardError ? e.message : e.stack}`); process.exit(1); }
+  }
   const commands = {
     new: cmdNew, draft: cmdDraft, ls: cmdLs, approve: cmdApprove, unapprove: cmdUnapprove, next: (b) => startNext(b), start: cmdStart,
     answer: cmdAnswer, press: cmdPress, clean: cmdClean, resume: cmdResume, save: cmdSave, show: cmdShow, update: cmdUpdate, config: cmdConfig, 'add-repo': cmdAddRepo, 'remove-repo': cmdRemoveRepo, 'suggest-repos': cmdSuggestRepos, tick: cmdTick, where: cmdWhere, ask: cmdAsk, done: cmdDone, 'ship-mark': cmdShipMark,
   };
   if (!cmd || !commands[cmd]) {
-    console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
+    console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(4, 11).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
     process.exit(cmd ? 1 : 0);
   }
   try {

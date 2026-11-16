@@ -52,6 +52,13 @@ tabs, `board-top`) with:
 
 - It needs the project's CLI (`herdr-board.mjs`, Node 18+, git, Claude Code, optionally `gh`) and a `board.json`: the mod
   alone draws nothing useful. Set **Board CLI** and **Board folder** in ⚙.
+- With your own layout and tab bar, add the board yourself (the README's "Adding the board to a layout with its own tab bar"):
+  1. a hidden layout block `board-side` (or `board-top`) with `content: { mod: "herdr-board", props: { slot: "side" } }`;
+  2. a tab bar button whose click runs `run(node.hidden ? "layout.show" : "layout.hide", { id })` on that id, where the id
+     follows `shared("herdr-board.settings").position` (`side` → `board-side`, `top` → `board-top`);
+  3. the red count: `shared("herdr-board.needs") ?? 0`, shown while the node is hidden.
+- `herdr-board.mjs init <folder>` makes a board (`board.json`, `cards/`); `herdr-board.mjs version` is the CLI id the panel
+  compares between machines (it flags a remote CLI that differs from this computer's board).
 - The layout needs nodes with ids `board-side` and `board-top` (the repo's `layout/board.json` has them) for the Board
   button and the Position setting. Without them the panel still works as a plain mod in any slot.
 - Herdr updates to its own tab bar don't reach `herdr-board-tabs`; redo the copy with `herdr-app do mod.clone` and re-add the button
