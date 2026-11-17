@@ -209,7 +209,7 @@ read from the end of its Claude session transcript, else from its terminal), to 
 ```json
 {
   "name": "Payments",
-  "space": "<Herdr space id on that machine: agents show up there as tabs>",
+  "space": "<optional: one Herdr space id for every agent. Left out, each agent opens in the space of its repo, found from the live terminals in the repo folder>",
   "hcSession": "<only for a separate test core; leave out normally>",
   "maxParallel": 3,
   "permissionMode": "auto",
