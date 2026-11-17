@@ -850,6 +850,25 @@ function git(args, opts = {}) {
 }
 function gitWhy(e) { return String(e.stderr || e.message).trim().split('\n')[0]; }   // first line of git's error
 
+// The Herdr space of a repo: board.space if the board names one, else the space most of the live terminals in the
+// repo's own folder belong to (card and draft terminals do not count: they may be misplaced). null when none: Herdr
+// then puts the terminal in the active space. So the cards of two repos land in two spaces, on one board.
+function spaceFor(board, repoName) {
+  if (board.space) return board.space;
+  const low = (p) => slash(String(p || '')).replace(/\/+$/, '').toLowerCase();
+  const root = low(board.repos[repoName]?.path), wts = low(board.worktrees);
+  if (!root) return null;
+  const inside = (cwd, dir) => cwd === dir || cwd.startsWith(`${dir}/`);
+  const votes = {};
+  for (const t of hc(board, ['ls'], { allowFail: true })?.terminals || []) {
+    const cwd = low(t.cwd);
+    if (t.address.includes('/') || !inside(cwd, root) || inside(cwd, wts)) continue;   // another machine, or not in the repo's folder
+    const l = hc(board, ['get', t.address], { allowFail: true })?.labels || {};
+    if (l['herdr.space'] && !l.card && !l.draft) votes[l['herdr.space']] = (votes[l['herdr.space']] || 0) + 1;
+  }
+  return Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0] || null;
+}
+
 // Starts the card's claude in its worktree as a named hc terminal. `claudeArgs` go right after "claude"
 // (--session-id or --resume), `tail` after the board's own options (the opening prompt).
 function launchAgent(board, card, wt, claudeArgs, tail) {
@@ -857,7 +876,8 @@ function launchAgent(board, card, wt, claudeArgs, tail) {
   const rules = renderRules(board, card);
   const args = ['run', '--bg', '--no-parent', '--outlive-parent', '--name', name, '--cwd', wt,
     '--label', `card=${card.id}`];
-  if (board.space) args.push('--label', `herdr.space=${board.space}`);
+  const space = spaceFor(board, card.meta.repo);
+  if (space) args.push('--label', `herdr.space=${space}`);
   args.push('--', 'claude', ...claudeArgs, '--model', card.meta.model, '--effort', card.meta.effort, '--permission-mode', board.permissionMode || 'auto',
     '-n', `${card.id} ${card.meta.title}`.slice(0, 60),
     '--add-dir', slash(board.dir), '--append-system-prompt-file', rules, ...tail);
@@ -1012,7 +1032,8 @@ function cmdDraft(board, args) {
     .map(([k, v]) => `- ${k}: ${String(v).trim()}`).join('\n') || '(nothing yet)';
   const brief = `Help me create a card on the "${repo}" board. What I wrote so far:\n${given}\nAsk me what is missing, then create the card.`;
   const args2 = ['run', '--bg', '--no-parent', '--outlive-parent', '--name', name, '--cwd', slash(r.path), '--label', 'draft=1'];
-  if (board.space) args2.push('--label', `herdr.space=${board.space}`);
+  const space = spaceFor(board, repo);
+  if (space) args2.push('--label', `herdr.space=${space}`);
   args2.push('--', 'claude', '--model', 'sonnet', '--permission-mode', board.permissionMode || 'auto',
     '-n', `New card: ${title || repo}`.slice(0, 60), '--add-dir', slash(board.dir), '--append-system-prompt-file', slash(rules), brief);
   hc(board, args2);

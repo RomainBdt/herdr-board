@@ -694,3 +694,66 @@ describe('add-repo / remove-repo: edge cases', () => {
     assert.ok(JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8')).repos.e2);
   });
 });
+
+describe('start: the card agent opens in its repo\'s Herdr space', () => {
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' });
+  // two real repos; a fake hc whose terminals (live now) carry labels by address
+  function setup(terminals) {
+    const board = JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8'));
+    const paths = {};
+    for (const name of ['app', 'other']) {
+      const repo = paths[name] = join(b.dir, name).replace(/\\/g, '/');
+      mkdirSync(repo);
+      git(repo, 'init', '-q', '-b', 'main');
+      git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+      board.repos[name].path = repo;
+    }
+    writeFileSync(join(b.dir, 'board.json'), JSON.stringify(board));
+    const log = join(b.dir, 'hc.log');
+    const fake = join(b.dir, 'hc.mjs');
+    writeFileSync(fake, `import {appendFileSync} from 'node:fs';
+appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+const T = ${JSON.stringify(terminals(paths, join(b.dir, 'worktrees').replace(/\\/g, '/')))};
+const c = process.argv[2];
+console.log(c === 'ls' ? JSON.stringify({ terminals: T.map(({ labels, ...t }) => t) })
+  : c === 'get' ? JSON.stringify({ labels: T.find(t => t.address === process.argv[4])?.labels || {} })
+  : c === 'read' ? '❯ auto mode' : '{}');`);
+    const run = (...args) => spawnSync(process.execPath, [join(ROOT, 'herdr-board.mjs'), '--board', b.dir, ...args],
+      { env: { ...process.env, HERDR_BOARD_HC_SCRIPT: fake }, encoding: 'utf8' });
+    const labels = () => {
+      const r = readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(c => c[0] === 'run').pop();
+      return r.filter((a, i) => r[i - 1] === '--label');
+    };
+    return { run, labels };
+  }
+  const startable = (id, repo) => b.write(id, cardText({ id, title: 'x', repo, status: 'ready', approved: 'true', model: 'sonnet', effort: 'medium' }));
+
+  test('each repo gets the space of its own terminals; card and other-machine terminals do not vote', () => {
+    const s = setup((p, wts) => [
+      { address: 't1', cwd: p.app, labels: { 'herdr.space': 'spA' } },
+      { address: 't2', cwd: `${p.app}/src`, labels: { 'herdr.space': 'spA' } },
+      { address: 't3', cwd: p.other, labels: { 'herdr.space': 'spB' } },
+      { address: 't4', cwd: p.app, labels: { 'herdr.space': 'spB', card: 'X-1' } },   // a misplaced card agent
+      { address: 't5', cwd: `${wts}/X-1`, labels: { 'herdr.space': 'spB' } },
+      { address: 'vps/t6', cwd: p.app, labels: { 'herdr.space': 'spB' } },
+    ]);
+    startable('TST-1', 'app');
+    startable('OTH-1', 'other');
+    assert.equal(s.run('start', 'TST-1').status, 0);
+    assert.ok(s.labels().includes('herdr.space=spA'));
+    assert.equal(s.run('start', 'OTH-1').status, 0);
+    assert.ok(s.labels().includes('herdr.space=spB'));
+  });
+
+  test('no terminal in the repo\'s folder: no space label (Herdr picks), and board.space still wins', () => {
+    const s = setup(() => []);
+    startable('TST-1', 'app');
+    assert.equal(s.run('start', 'TST-1').status, 0);
+    assert.ok(!s.labels().some(l => l.startsWith('herdr.space=')));
+    const board = JSON.parse(readFileSync(join(b.dir, 'board.json'), 'utf8'));
+    writeFileSync(join(b.dir, 'board.json'), JSON.stringify({ ...board, space: 'spZ' }));
+    startable('TST-2', 'app');
+    assert.equal(s.run('start', 'TST-2').status, 0);
+    assert.ok(s.labels().includes('herdr.space=spZ'));
+  });
+});
